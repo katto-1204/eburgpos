@@ -22,12 +22,6 @@ export default function Sidebar() {
       label: "Order\nHistory",
     },
     {
-      id: "sales",
-      route: "/cashier/sales",
-      icon: "stats-chart",
-      label: "Sales\nReport",
-    },
-    {
       id: "inventory",
       route: "/cashier/inventory",
       icon: "cube",
