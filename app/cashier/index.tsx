@@ -127,7 +127,8 @@ export default function CashierPOS() {
     return matchesCategory && matchesSearch
   })
 
-  // Check inventory stock for a product
+  // Check inventory stock for a product (for real-time user feedback during cart building)
+  // Note: Final inventory validation happens in the atomic transaction function
   const checkInventoryStock = async (productId: string): Promise<number> => {
     try {
       const { data, error } = await supabase
@@ -255,6 +256,20 @@ export default function CashierPOS() {
     })
   }
 
+  /**
+   * Confirm and process the order using atomic database transaction
+   *
+   * This function uses the database's process_complete_order() transaction function which:
+   * 1. Validates all inventory stock availability
+   * 2. Creates the order record atomically
+   * 3. Inserts all order items
+   * 4. Deducts inventory (via database trigger)
+   * 5. Processes payment if provided
+   * 6. Updates order status to 'Completed'
+   * 7. Logs the transaction for audit trail
+   *
+   * If any step fails, the entire transaction is rolled back automatically.
+   */
   const confirmOrder = async () => {
     if (orderItems.length === 0) {
       Toast.show({
@@ -268,50 +283,74 @@ export default function CashierPOS() {
 
     setIsConfirmingOrder(true)
 
-    const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
-    const tax = 6.0
-    const discount = 0.0
-    const total = subtotal + tax - discount
-
     try {
+      // Calculate total amount including tax
+      const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+      const tax = 6.0
+      const discount = 0.0
+      const total = subtotal + tax - discount
 
-      // 1) Insert main order
-      const { data: insertedOrder, error: orderError } = await supabase
-        .from("orders")
-        .insert({
-          customer_name: customerName,
-          total_amount: total,
-          status: "Completed",
-          notes: orderType, // "Dine In" / "Take Out"
-        })
-        .select("order_id")
-        .maybeSingle()
-
-      if (orderError || !insertedOrder) {
-        Toast.show({ type: "error", text1: "Order Failed", text2: "Could not save order. Please try again." })
-        return
-      }
-
-      const orderId = insertedOrder.order_id as number
-
-      // 2) Insert line items
-      const lineItems = orderItems.map((item) => ({
-        order_id: orderId,
+      // Prepare order items in JSONB format for the transaction function
+      const orderItemsJson = orderItems.map((item) => ({
         product_id: Number(item.id),
         quantity: item.quantity,
         unit_price: item.price,
       }))
 
-      const { error: lineError } = await supabase.from("order_product").insert(lineItems)
-      if (lineError) {
-        Toast.show({ type: "error", text1: "Order Failed", text2: "Could not save order items. Please try again." })
+      // Prepare payment info (cash payment by default)
+      const paymentInfo = {
+        amount_paid: total,
+        payment_method: "Cash"
+      }
+
+      // TODO: Add cashier_id when authentication is implemented
+      // For now, we'll pass null and the function will handle it
+      // Future enhancement: Get cashier_id from authentication context
+      const cashierId = null // Replace with: useAuth()?.cashierId
+
+      console.log("🔄 Processing order with transaction function...")
+      console.log("📋 Order details:", {
+        customer: customerName || "Walk-in Customer",
+        items: orderItemsJson.length,
+        total: total,
+        orderType: orderType
+      })
+
+      // Call the atomic transaction function
+      const { data: result, error: transactionError } = await supabase
+        .rpc('process_complete_order', {
+          customer_name_param: customerName || "Walk-in Customer",
+          order_items_param: orderItemsJson,
+          payment_info_param: paymentInfo,
+          cashier_id_param: cashierId
+        })
+
+      if (transactionError) {
+        console.error("Transaction error:", transactionError)
+        Toast.show({
+          type: "error",
+          text1: "Order Failed",
+          text2: transactionError.message || "Transaction failed. Please try again.",
+          visibilityTime: 4000,
+        })
         return
       }
 
-      // 3) Inventory stock will be automatically decreased by database trigger when order_product records are inserted
-      console.log("📦 Inventory will be automatically decreased by database trigger (trigger_update_inventory)")
+      if (!result?.success) {
+        console.error("Transaction failed:", result)
+        Toast.show({
+          type: "error",
+          text1: "Order Failed",
+          text2: result?.message || "Transaction failed. Please try again.",
+          visibilityTime: 4000,
+        })
+        return
+      }
 
-      // 4) Clear cart immediately and show success
+      // Transaction successful!
+      console.log("✅ Order processed successfully:", result)
+
+      // Clear cart and update order number
       setOrderItems([])
       const nextOrderNumber = currentOrderNumber + 1
       setCurrentOrderNumber(nextOrderNumber)
@@ -319,19 +358,25 @@ export default function CashierPOS() {
       Toast.show({
         type: "success",
         text1: "Order Confirmed!",
-        text2: `Order #${nextOrderNumber} has been placed successfully`,
+        text2: `Order #${nextOrderNumber} processed successfully`,
       })
 
-      // 5) Trigger inventory refresh after a brief delay to ensure DB updates are complete
+      // Trigger inventory refresh after a brief delay
       setTimeout(() => {
         if (refreshInventory) {
           console.log("🔄 Triggering inventory refresh...")
           refreshInventory()
         }
       }, 500)
+
     } catch (err) {
       console.error("Order confirmation error:", err)
-      Toast.show({ type: "error", text1: "Order Failed", text2: "Something went wrong. Please try again." })
+      Toast.show({
+        type: "error",
+        text1: "Order Failed",
+        text2: "Something went wrong. Please try again.",
+        visibilityTime: 4000,
+      })
     } finally {
       setIsConfirmingOrder(false)
     }
@@ -362,11 +407,11 @@ export default function CashierPOS() {
 
   return (
     <InventoryRefreshContext.Provider value={{ refreshInventory, setRefreshInventory }}>
-      <CartContext.Provider value={cartContextValue}>
-        <View style={styles.container}>
-          <Sidebar />
-          <View style={styles.mainContent}>
-            <Header searchQuery={searchQuery} onSearchChange={setSearchQuery} />
+    <CartContext.Provider value={cartContextValue}>
+      <View style={styles.container}>
+        <Sidebar />
+        <View style={styles.mainContent}>
+          <Header searchQuery={searchQuery} onSearchChange={setSearchQuery} />
 
           {/* Category Tabs */}
           <View style={styles.categoriesContainer}>
@@ -398,48 +443,48 @@ export default function CashierPOS() {
                 <Text style={{ marginTop: 16, fontSize: 16, color: "#6B7280" }}>Loading menu...</Text>
               </View>
             ) : (
-              <View style={styles.menuGrid}>
-                {filteredItems.map((item) => {
-                  const quantity = getItemQuantity(item.id)
-                  return (
-                    <TouchableOpacity key={item.id} style={styles.menuItem} onPress={() => addToOrder(item)}>
+            <View style={styles.menuGrid}>
+              {filteredItems.map((item) => {
+                const quantity = getItemQuantity(item.id)
+                return (
+                  <TouchableOpacity key={item.id} style={styles.menuItem} onPress={() => addToOrder(item)}>
                       <View style={styles.menuItemContent}>
-                        <View style={styles.menuItemImage}>
-                          <Text style={styles.menuItemImageText}>🍔</Text>
-                        </View>
+                    <View style={styles.menuItemImage}>
+                      <Text style={styles.menuItemImageText}>🍔</Text>
+                    </View>
                         <View style={styles.menuItemTextContainer}>
                           <Text style={styles.menuItemName} numberOfLines={2} ellipsizeMode="tail">{item.name}</Text>
                           <Text style={styles.menuItemCategory} numberOfLines={1} ellipsizeMode="tail">{item.category}</Text>
                         </View>
-                        <View style={styles.menuItemFooter}>
-                          <Text style={styles.menuItemPrice}>₱{item.price.toFixed(2)}</Text>
-                          <View style={styles.quantityControls}>
-                            <TouchableOpacity
-                              style={styles.quantityButton}
-                              onPress={(e) => {
-                                e.stopPropagation()
-                                updateItemQuantity(item.id, -1)
-                              }}
-                            >
-                              <Ionicons name="remove" size={12} color="#92400E" />
-                            </TouchableOpacity>
-                            <Text style={styles.quantityText}>{quantity}</Text>
-                            <TouchableOpacity
-                              style={[styles.quantityButton, styles.quantityButtonAdd]}
-                              onPress={(e) => {
-                                e.stopPropagation()
-                                updateItemQuantity(item.id, 1)
-                              }}
-                            >
-                              <Ionicons name="add" size={12} color="#000000" />
-                            </TouchableOpacity>
+                    <View style={styles.menuItemFooter}>
+                      <Text style={styles.menuItemPrice}>₱{item.price.toFixed(2)}</Text>
+                      <View style={styles.quantityControls}>
+                        <TouchableOpacity
+                          style={styles.quantityButton}
+                          onPress={(e) => {
+                            e.stopPropagation()
+                            updateItemQuantity(item.id, -1)
+                          }}
+                        >
+                          <Ionicons name="remove" size={12} color="#92400E" />
+                        </TouchableOpacity>
+                        <Text style={styles.quantityText}>{quantity}</Text>
+                        <TouchableOpacity
+                          style={[styles.quantityButton, styles.quantityButtonAdd]}
+                          onPress={(e) => {
+                            e.stopPropagation()
+                            updateItemQuantity(item.id, 1)
+                          }}
+                        >
+                          <Ionicons name="add" size={12} color="#000000" />
+                        </TouchableOpacity>
                           </View>
-                        </View>
                       </View>
-                    </TouchableOpacity>
-                  )
-                })}
-              </View>
+                    </View>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
             )}
           </ScrollView>
         </View>
@@ -447,7 +492,7 @@ export default function CashierPOS() {
         {/* Order Panel */}
         <OrderPanel />
       </View>
-      </CartContext.Provider>
+    </CartContext.Provider>
     </InventoryRefreshContext.Provider>
   )
 }
@@ -600,7 +645,7 @@ function OrderPanel() {
           {isConfirmingOrder ? (
             <ActivityIndicator size="small" color="#000000" />
           ) : (
-            <Ionicons name="checkmark" size={16} color="#000000" />
+          <Ionicons name="checkmark" size={16} color="#000000" />
           )}
           <Text style={styles.confirmButtonText}>
             {isConfirmingOrder ? "Confirming..." : "Confirm Order"}

@@ -270,6 +270,225 @@ WHERE o.status = 'Completed' OR o.status IS NULL
 GROUP BY p.product_id, p.name, p.item_code, c.name
 ORDER BY total_quantity_sold DESC NULLS LAST;
 
+-- ============================================
+-- TRANSACTION MANAGEMENT SYSTEM
+-- ============================================
+
+-- Create transaction log table for monitoring and auditing
+CREATE TABLE transaction_log (
+    transaction_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    cashier_id INT REFERENCES cashier(cashier_id),
+    operation_type VARCHAR(50), -- 'order_process', 'inventory_update', 'user_management'
+    order_id INT REFERENCES orders(order_id),
+    start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    end_time TIMESTAMP,
+    status VARCHAR(20), -- 'committed', 'rolled_back', 'failed'
+    affected_tables TEXT[],
+    error_message TEXT,
+    transaction_data JSONB
+);
+
+-- Create index for transaction log performance
+CREATE INDEX idx_transaction_log_cashier ON transaction_log(cashier_id);
+CREATE INDEX idx_transaction_log_start_time ON transaction_log(start_time);
+
+-- Create transaction function for atomic order processing
+CREATE OR REPLACE FUNCTION process_complete_order(
+    customer_name_param VARCHAR(100),
+    order_items_param JSONB,
+    payment_info_param JSONB DEFAULT NULL,
+    cashier_id_param INT DEFAULT NULL
+) RETURNS JSONB AS $$
+DECLARE
+    new_order_id INT;
+    total_amount DECIMAL(10,2) := 0;
+    order_item RECORD;
+    current_stock INT;
+    result JSONB;
+    transaction_log_id UUID;
+BEGIN
+    -- Start explicit transaction with proper isolation to prevent concurrent inventory conflicts
+    SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+
+    -- Log transaction start
+    SELECT log_transaction_activity(
+        cashier_id_param,
+        'order_process',
+        NULL::INT,
+        'started',
+        ARRAY['orders', 'order_product', 'inventory', 'payment'],
+        NULL,
+        jsonb_build_object('customer_name', customer_name_param, 'item_count', jsonb_array_length(order_items_param))
+    ) INTO transaction_log_id;
+
+    BEGIN
+        -- 1. Validate inventory availability first for all items
+        FOR order_item IN SELECT * FROM jsonb_array_elements(order_items_param)
+        LOOP
+            -- Check if product exists and is active
+            IF NOT EXISTS (
+                SELECT 1 FROM product
+                WHERE product_id = (order_item.value->>'product_id')::INT
+                AND is_active = TRUE
+            ) THEN
+                RAISE EXCEPTION 'Product ID % does not exist or is inactive', (order_item.value->>'product_id');
+            END IF;
+
+            -- Check inventory stock
+            SELECT quantity_in_stock INTO current_stock
+            FROM inventory
+            WHERE product_id = (order_item.value->>'product_id')::INT;
+
+            IF current_stock IS NULL THEN
+                RAISE EXCEPTION 'No inventory record found for product ID %', (order_item.value->>'product_id');
+            END IF;
+
+            IF current_stock < (order_item.value->>'quantity')::INT THEN
+                RAISE EXCEPTION 'Insufficient stock for product ID %. Available: %, Requested: %',
+                    (order_item.value->>'product_id'), current_stock, (order_item.value->>'quantity')::INT;
+            END IF;
+
+            -- Calculate total amount
+            total_amount := total_amount + (
+                (order_item.value->>'unit_price')::DECIMAL(10,2) *
+                (order_item.value->>'quantity')::INT
+            );
+        END LOOP;
+
+        -- 2. Create order record
+        INSERT INTO orders (
+            customer_name,
+            total_amount,
+            status,
+            cashier_id,
+            order_date
+        ) VALUES (
+            customer_name_param,
+            total_amount,
+            'Pending', -- Will be updated to 'Completed' at the end
+            cashier_id_param,
+            CURRENT_TIMESTAMP
+        ) RETURNING order_id INTO new_order_id;
+
+        -- 3. Insert order items
+        FOR order_item IN SELECT * FROM jsonb_array_elements(order_items_param)
+        LOOP
+            INSERT INTO order_product (
+                order_id,
+                product_id,
+                quantity,
+                unit_price
+            ) VALUES (
+                new_order_id,
+                (order_item.value->>'product_id')::INT,
+                (order_item.value->>'quantity')::INT,
+                (order_item.value->>'unit_price')::DECIMAL(10,2)
+            );
+        END LOOP;
+
+        -- 4. Deduct inventory atomically (this will trigger the existing inventory update function)
+        -- The trigger_update_inventory trigger will handle this automatically when order_product records are inserted
+
+        -- 5. Process payment if payment info is provided
+        IF payment_info_param IS NOT NULL THEN
+            INSERT INTO payment (
+                order_id,
+                payment_date,
+                amount_paid,
+                payment_method,
+                payment_status
+            ) VALUES (
+                new_order_id,
+                CURRENT_TIMESTAMP,
+                (payment_info_param->>'amount_paid')::DECIMAL(10,2),
+                COALESCE(payment_info_param->>'payment_method', 'Cash'),
+                'Completed'
+            );
+        END IF;
+
+        -- 6. Update order status to 'Completed'
+        UPDATE orders
+        SET status = 'Completed'
+        WHERE order_id = new_order_id;
+
+        -- Update transaction log with success
+        UPDATE transaction_log
+        SET status = 'committed',
+            order_id = new_order_id,
+            transaction_data = jsonb_build_object(
+                'customer_name', customer_name_param,
+                'item_count', jsonb_array_length(order_items_param),
+                'total_amount', total_amount,
+                'order_id', new_order_id
+            )
+        WHERE transaction_id = transaction_log_id;
+
+        -- Success response
+        result := jsonb_build_object(
+            'success', true,
+            'order_id', new_order_id,
+            'total_amount', total_amount,
+            'transaction_id', transaction_log_id,
+            'message', 'Order processed successfully'
+        );
+
+        RETURN result;
+
+    EXCEPTION WHEN OTHERS THEN
+        -- Log transaction failure
+        UPDATE transaction_log
+        SET status = 'rolled_back',
+            error_message = SQLERRM,
+            transaction_data = jsonb_build_object(
+                'customer_name', customer_name_param,
+                'item_count', jsonb_array_length(order_items_param),
+                'error_details', SQLERRM
+            )
+        WHERE transaction_id = transaction_log_id;
+
+        -- Automatic rollback on any error
+        RAISE EXCEPTION 'Order processing failed: %', SQLERRM;
+    END;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create function to log transaction activities
+CREATE OR REPLACE FUNCTION log_transaction_activity(
+    cashier_id_param INT,
+    operation_type_param VARCHAR(50),
+    order_id_param INT,
+    status_param VARCHAR(20),
+    affected_tables_param TEXT[] DEFAULT NULL,
+    error_message_param TEXT DEFAULT NULL,
+    transaction_data_param JSONB DEFAULT NULL
+) RETURNS UUID AS $$
+DECLARE
+    log_id UUID;
+BEGIN
+    INSERT INTO transaction_log (
+        cashier_id,
+        operation_type,
+        order_id,
+        status,
+        end_time,
+        affected_tables,
+        error_message,
+        transaction_data
+    ) VALUES (
+        cashier_id_param,
+        operation_type_param,
+        order_id_param,
+        status_param,
+        CURRENT_TIMESTAMP,
+        affected_tables_param,
+        error_message_param,
+        transaction_data_param
+    ) RETURNING transaction_id INTO log_id;
+
+    RETURN log_id;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Grant permissions (adjust as needed for your Supabase setup)
 -- These are examples - configure based on your RLS policies
 
@@ -283,3 +502,4 @@ COMMENT ON TABLE order_product IS 'Order line items';
 COMMENT ON TABLE payment IS 'Payment transactions';
 COMMENT ON TABLE inventory IS 'Product inventory levels';
 COMMENT ON TABLE activity_log IS 'System activity audit log';
+COMMENT ON TABLE transaction_log IS 'Transaction monitoring and audit trail';
