@@ -1,16 +1,28 @@
 "use client"
 
-import { useState, createContext, useContext } from "react"
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions } from "react-native"
+import { useState, createContext, useContext, useEffect } from "react"
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions, ActivityIndicator, TextInput } from "react-native"
 import Toast from "react-native-toast-message"
 import { Ionicons } from "@expo/vector-icons"
 
 import Sidebar from "../../components/Sidebar"
 import Header from "../../components/Header"
 import type { MenuItem, OrderItem } from "../../types"
-import { menuItems, categories } from "../../utils/constants"
+import { supabase } from "../../utils/supabaseClient"
 
 const { width } = Dimensions.get("window")
+
+// Calculate card width to prevent distortion - clamp between 160-220px for 4 columns
+const MENU_CARD_WIDTH = Math.max(Math.min((width - 400 - 60) / 4 - 15, 220), 160)
+
+// Create context for inventory refresh
+export const InventoryRefreshContext = createContext<{
+  refreshInventory?: () => void
+  setRefreshInventory: (fn: (() => void) | undefined) => void
+}>({
+  refreshInventory: undefined,
+  setRefreshInventory: () => {},
+})
 
 // Create context for cart state
 const CartContext = createContext<{
@@ -19,7 +31,7 @@ const CartContext = createContext<{
   addToOrder: (item: MenuItem) => void
   updateItemQuantity: (itemId: string, change: number) => void
   clearCart: () => void
-  confirmOrder: () => void
+  confirmOrder: () => Promise<void>
   orderType: "Dine In" | "Take Out"
   setOrderType: (type: "Dine In" | "Take Out") => void
   customerName: string
@@ -27,13 +39,15 @@ const CartContext = createContext<{
   customerPhone: string
   setCustomerPhone: (phone: string) => void
   currentOrderNumber: number
+  isConfirmingOrder: boolean
+  setIsConfirmingOrder: (loading: boolean) => void
 }>({
   orderItems: [],
   setOrderItems: () => {},
   addToOrder: () => {},
   updateItemQuantity: () => {},
   clearCart: () => {},
-  confirmOrder: () => {},
+  confirmOrder: async () => {},
   orderType: "Dine In",
   setOrderType: () => {},
   customerName: "",
@@ -41,6 +55,8 @@ const CartContext = createContext<{
   customerPhone: "",
   setCustomerPhone: () => {},
   currentOrderNumber: 2128,
+  isConfirmingOrder: false,
+  setIsConfirmingOrder: () => {},
 })
 
 export const useCart = () => useContext(CartContext)
@@ -50,9 +66,60 @@ export default function CashierPOS() {
   const [orderItems, setOrderItems] = useState<OrderItem[]>([])
   const [orderType, setOrderType] = useState<"Dine In" | "Take Out">("Dine In")
   const [currentOrderNumber, setCurrentOrderNumber] = useState(2128)
-  const [customerName, setCustomerName] = useState("Catherine Arnado")
+  const [customerName, setCustomerName] = useState("")
   const [customerPhone, setCustomerPhone] = useState("+63 9056829865")
   const [searchQuery, setSearchQuery] = useState("")
+  const [isConfirmingOrder, setIsConfirmingOrder] = useState(false)
+  const [refreshInventory, setRefreshInventory] = useState<(() => void) | undefined>()
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([])
+  const [categories, setCategories] = useState<string[]>(["All"])
+  const [menuLoading, setMenuLoading] = useState(true)
+
+  // Fetch menu items from database
+  useEffect(() => {
+    const fetchMenuItems = async () => {
+      setMenuLoading(true)
+      try {
+        // Fetch products with their categories
+        const { data: products, error } = await supabase
+          .from("product")
+          .select(`
+            product_id,
+            name,
+            price,
+            category:category(name)
+          `)
+          .eq("is_active", true)
+
+        if (error) {
+          console.error("Error fetching menu items:", error)
+          return
+        }
+
+        // Convert to MenuItem format
+        const formattedItems: MenuItem[] = (products || []).map((product: any) => ({
+          id: String(product.product_id),
+          name: product.name,
+          price: product.price,
+          category: product.category?.name || "Uncategorized",
+          image: "/placeholder.svg"
+        }))
+
+        setMenuItems(formattedItems)
+
+        // Extract unique categories
+        const uniqueCategories = ["All", ...new Set(formattedItems.map(item => item.category))]
+        setCategories(uniqueCategories)
+
+      } catch (err) {
+        console.error("Error loading menu items:", err)
+      } finally {
+        setMenuLoading(false)
+      }
+    }
+
+    fetchMenuItems()
+  }, [])
 
   const filteredItems = menuItems.filter((item) => {
     const matchesCategory = selectedCategory === "All" || item.category === selectedCategory
@@ -60,7 +127,43 @@ export default function CashierPOS() {
     return matchesCategory && matchesSearch
   })
 
-  const addToOrder = (item: MenuItem) => {
+  // Check inventory stock for a product (for real-time user feedback during cart building)
+  // Note: Final inventory validation happens in the atomic transaction function
+  const checkInventoryStock = async (productId: string): Promise<number> => {
+    try {
+      const { data, error } = await supabase
+        .from("inventory")
+        .select("quantity_in_stock")
+        .eq("product_id", productId)
+        .single()
+
+      if (error || !data) {
+        console.error("Error checking inventory:", error)
+        return 0 // Assume out of stock if error
+      }
+
+      return data.quantity_in_stock || 0
+    } catch (err) {
+      console.error("Error checking inventory stock:", err)
+      return 0 // Assume out of stock if error
+    }
+  }
+
+  const addToOrder = async (item: MenuItem) => {
+    // Check inventory stock
+    const stock = await checkInventoryStock(item.id)
+    const currentQuantityInCart = orderItems.find(orderItem => orderItem.id === item.id)?.quantity || 0
+
+    if (stock <= currentQuantityInCart) {
+      Toast.show({
+        type: "error",
+        text1: "Out of Stock",
+        text2: `${item.name} is currently out of stock`,
+        visibilityTime: 3000,
+      })
+      return
+    }
+
     const existingItem = orderItems.find((orderItem) => orderItem.id === item.id)
     if (existingItem) {
       setOrderItems(
@@ -79,7 +182,7 @@ export default function CashierPOS() {
     })
   }
 
-  const updateItemQuantity = (itemId: string, change: number) => {
+  const updateItemQuantity = async (itemId: string, change: number) => {
     const item = menuItems.find((m) => m.id === itemId)
     if (!item) return
 
@@ -96,6 +199,24 @@ export default function CashierPOS() {
           visibilityTime: 2000,
         })
       } else {
+        // Check inventory stock when increasing quantity
+        if (change > 0) {
+          const stock = await checkInventoryStock(itemId)
+          const currentQuantityInCart = orderItems
+            .filter(orderItem => orderItem.id !== itemId)
+            .reduce((sum, orderItem) => sum + orderItem.quantity, 0)
+
+          if (stock <= currentQuantityInCart + existingItem.quantity) {
+            Toast.show({
+              type: "error",
+              text1: "Out of Stock",
+              text2: `Cannot add more ${item.name} - insufficient stock`,
+              visibilityTime: 3000,
+            })
+            return
+          }
+        }
+
         setOrderItems(
           orderItems.map((orderItem) =>
             orderItem.id === itemId ? { ...orderItem, quantity: newQuantity } : orderItem,
@@ -103,6 +224,18 @@ export default function CashierPOS() {
         )
       }
     } else if (change > 0) {
+      // Check inventory stock when adding new item
+      const stock = await checkInventoryStock(itemId)
+      if (stock <= 0) {
+        Toast.show({
+          type: "error",
+          text1: "Out of Stock",
+          text2: `${item.name} is currently out of stock`,
+          visibilityTime: 3000,
+        })
+        return
+      }
+
       setOrderItems([...orderItems, { ...item, quantity: 1 }])
       Toast.show({
         type: "success",
@@ -123,7 +256,21 @@ export default function CashierPOS() {
     })
   }
 
-  const confirmOrder = () => {
+  /**
+   * Confirm and process the order using atomic database transaction
+   *
+   * This function uses the database's process_complete_order() transaction function which:
+   * 1. Validates all inventory stock availability
+   * 2. Creates the order record atomically
+   * 3. Inserts all order items
+   * 4. Deducts inventory (via database trigger)
+   * 5. Processes payment if provided
+   * 6. Updates order status to 'Completed'
+   * 7. Logs the transaction for audit trail
+   *
+   * If any step fails, the entire transaction is rolled back automatically.
+   */
+  const confirmOrder = async () => {
     if (orderItems.length === 0) {
       Toast.show({
         type: "error",
@@ -134,15 +281,105 @@ export default function CashierPOS() {
       return
     }
 
-    setOrderItems([])
-    setCurrentOrderNumber((prev) => prev + 1)
+    setIsConfirmingOrder(true)
 
-    Toast.show({
-      type: "success",
-      text1: "Order Confirmed!",
-      text2: `Order #${currentOrderNumber} has been placed successfully`,
-      visibilityTime: 3000,
-    })
+    try {
+      // Calculate total amount including tax
+      const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+      const tax = 6.0
+      const discount = 0.0
+      const total = subtotal + tax - discount
+
+      // Prepare order items in JSONB format for the transaction function
+      const orderItemsJson = orderItems.map((item) => ({
+        product_id: Number(item.id),
+        quantity: item.quantity,
+        unit_price: item.price,
+      }))
+
+      // Prepare payment info (cash payment by default)
+      const paymentInfo = {
+        amount_paid: total,
+        payment_method: "Cash"
+      }
+
+      // TODO: Add cashier_id when authentication is implemented
+      // For now, we'll pass null and the function will handle it
+      // Future enhancement: Get cashier_id from authentication context
+      const cashierId = null // Replace with: useAuth()?.cashierId
+
+      console.log("🔄 Processing order with transaction function...")
+      console.log("📋 Order details:", {
+        customer: customerName || "Walk-in Customer",
+        items: orderItemsJson.length,
+        total: total,
+        orderType: orderType
+      })
+
+      // Call the atomic transaction function
+      const { data: result, error: transactionError } = await supabase
+        .rpc('process_complete_order', {
+          customer_name_param: customerName || "Walk-in Customer",
+          order_items_param: orderItemsJson,
+          payment_info_param: paymentInfo,
+          cashier_id_param: cashierId
+        })
+
+      if (transactionError) {
+        console.error("Transaction error:", transactionError)
+        Toast.show({
+          type: "error",
+          text1: "Order Failed",
+          text2: transactionError.message || "Transaction failed. Please try again.",
+          visibilityTime: 4000,
+        })
+        return
+      }
+
+      if (!result?.success) {
+        console.error("Transaction failed:", result)
+        Toast.show({
+          type: "error",
+          text1: "Order Failed",
+          text2: result?.message || "Transaction failed. Please try again.",
+          visibilityTime: 4000,
+        })
+        return
+      }
+
+      // Transaction successful!
+      console.log("✅ Order processed successfully:", result)
+
+      // Clear cart and update order number
+      setOrderItems([])
+      const nextOrderNumber = currentOrderNumber + 1
+      setCurrentOrderNumber(nextOrderNumber)
+
+      Toast.show({
+        type: "success",
+        text1: "Order Confirmed!",
+        text2: `Order #${nextOrderNumber} processed successfully`,
+      })
+
+      // Trigger inventory refresh after a brief delay
+      setTimeout(() => {
+        if (refreshInventory) {
+          console.log("🔄 Triggering inventory refresh...")
+          refreshInventory()
+        }
+      }, 500)
+
+    } catch (err) {
+      console.error("Order confirmation error:", err)
+      Toast.show({
+        type: "error",
+        text1: "Order Failed",
+        text2: "Something went wrong. Please try again.",
+        visibilityTime: 4000,
+      })
+    } finally {
+      setIsConfirmingOrder(false)
+    }
   }
 
   const getItemQuantity = (itemId: string) => {
@@ -164,9 +401,12 @@ export default function CashierPOS() {
     customerPhone,
     setCustomerPhone,
     currentOrderNumber,
+    isConfirmingOrder,
+    setIsConfirmingOrder,
   }
 
   return (
+    <InventoryRefreshContext.Provider value={{ refreshInventory, setRefreshInventory }}>
     <CartContext.Provider value={cartContextValue}>
       <View style={styles.container}>
         <Sidebar />
@@ -197,16 +437,25 @@ export default function CashierPOS() {
 
           {/* Menu Items Grid */}
           <ScrollView style={styles.menuContainer} showsVerticalScrollIndicator={false}>
+            {menuLoading ? (
+              <View style={{ alignItems: "center", paddingVertical: 40 }}>
+                <ActivityIndicator size="large" color="#F97316" />
+                <Text style={{ marginTop: 16, fontSize: 16, color: "#6B7280" }}>Loading menu...</Text>
+              </View>
+            ) : (
             <View style={styles.menuGrid}>
               {filteredItems.map((item) => {
                 const quantity = getItemQuantity(item.id)
                 return (
                   <TouchableOpacity key={item.id} style={styles.menuItem} onPress={() => addToOrder(item)}>
+                      <View style={styles.menuItemContent}>
                     <View style={styles.menuItemImage}>
                       <Text style={styles.menuItemImageText}>🍔</Text>
                     </View>
-                    <Text style={styles.menuItemName}>{item.name}</Text>
-                    <Text style={styles.menuItemCategory}>{item.category}</Text>
+                        <View style={styles.menuItemTextContainer}>
+                          <Text style={styles.menuItemName} numberOfLines={2} ellipsizeMode="tail">{item.name}</Text>
+                          <Text style={styles.menuItemCategory} numberOfLines={1} ellipsizeMode="tail">{item.category}</Text>
+                        </View>
                     <View style={styles.menuItemFooter}>
                       <Text style={styles.menuItemPrice}>₱{item.price.toFixed(2)}</Text>
                       <View style={styles.quantityControls}>
@@ -229,12 +478,14 @@ export default function CashierPOS() {
                         >
                           <Ionicons name="add" size={12} color="#000000" />
                         </TouchableOpacity>
+                          </View>
                       </View>
                     </View>
                   </TouchableOpacity>
                 )
               })}
             </View>
+            )}
           </ScrollView>
         </View>
 
@@ -242,6 +493,7 @@ export default function CashierPOS() {
         <OrderPanel />
       </View>
     </CartContext.Provider>
+    </InventoryRefreshContext.Provider>
   )
 }
 
@@ -259,6 +511,7 @@ function OrderPanel() {
     customerPhone,
     setCustomerPhone,
     currentOrderNumber,
+    isConfirmingOrder,
   } = useCart()
 
   const updateOrderQuantity = (id: string, change: number) => {
@@ -308,6 +561,18 @@ function OrderPanel() {
             Take Out
           </Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Customer Name Input */}
+      <View style={styles.customerNameContainer}>
+        <Text style={styles.customerNameLabel}>Customer Name</Text>
+        <TextInput
+          style={styles.customerNameInput}
+          placeholder="Enter customer name"
+          value={customerName}
+          onChangeText={setCustomerName}
+          placeholderTextColor="#9CA3AF"
+        />
       </View>
 
       <ScrollView style={styles.orderItems} showsVerticalScrollIndicator={false}>
@@ -375,10 +640,16 @@ function OrderPanel() {
         <TouchableOpacity
           style={[styles.actionButton, styles.confirmButton]}
           onPress={confirmOrder}
-          disabled={orderItems.length === 0}
+          disabled={orderItems.length === 0 || isConfirmingOrder}
         >
+          {isConfirmingOrder ? (
+            <ActivityIndicator size="small" color="#000000" />
+          ) : (
           <Ionicons name="checkmark" size={16} color="#000000" />
-          <Text style={styles.confirmButtonText}>Confirm Order</Text>
+          )}
+          <Text style={styles.confirmButtonText}>
+            {isConfirmingOrder ? "Confirming..." : "Confirm Order"}
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -431,12 +702,17 @@ const styles = StyleSheet.create({
     gap: 15,
   },
   menuItem: {
-    width: (width - 400 - 60) / 6 - 15,
+    width: MENU_CARD_WIDTH,
     backgroundColor: "#FFFFFF",
     borderRadius: 12,
     borderWidth: 2,
     borderColor: "#92400E",
     padding: 15,
+    minHeight: 180, // Consistent card height
+  },
+  menuItemContent: {
+    flex: 1,
+    justifyContent: "space-between",
   },
   menuItemImage: {
     aspectRatio: 1,
@@ -449,21 +725,29 @@ const styles = StyleSheet.create({
   menuItemImageText: {
     fontSize: 30,
   },
+  menuItemTextContainer: {
+    flex: 1,
+    justifyContent: "flex-start",
+  },
   menuItemName: {
     fontSize: 14,
     fontWeight: "600",
     color: "#92400E",
     marginBottom: 5,
+    textAlign: "left",
   },
   menuItemCategory: {
     fontSize: 10,
     color: "#A16207",
-    marginBottom: 10,
+    marginBottom: 0,
+    textAlign: "left",
   },
   menuItemFooter: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginTop: "auto",
+    paddingTop: 10,
   },
   menuItemPrice: {
     fontSize: 16,
@@ -545,6 +829,25 @@ const styles = StyleSheet.create({
   },
   orderTypeButtonTextActive: {
     color: "#000000",
+  },
+  customerNameContainer: {
+    marginBottom: 20,
+  },
+  customerNameLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#374151",
+    marginBottom: 8,
+  },
+  customerNameInput: {
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: "#1F2937",
+    backgroundColor: "#FFFFFF",
   },
   orderItems: {
     flex: 1,

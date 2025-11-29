@@ -31,18 +31,7 @@ export default function AdminDashboard() {
       icon: "cube",
       color: "#8B5CF6",
     },
-    {
-      title: "System Settings",
-      description: "Configure system preferences",
-      icon: "settings",
-      color: "#6B7280",
-    },
-    {
-      title: "Backup & Restore",
-      description: "Manage data backup and restoration",
-      icon: "cloud-download",
-      color: "#EF4444",
-    },
+
   ]
 
   return (
@@ -79,7 +68,17 @@ export default function AdminDashboard() {
               style={[styles.featureCard, { borderLeftColor: feature.color }]}
               onPress={() => {
                 // Navigate to specific admin feature
-                console.log(`Navigate to ${feature.title}`)
+                if (feature.title === "User Management") {
+                  router.push("/admin/users")
+                } else if (feature.title === "Sales Analytics") {
+                  router.push("/admin/sales")
+                } else if (feature.title === "Menu Management") {
+                  router.push("/admin/menu")
+                } else if (feature.title === "Inventory Control") {
+                  router.push("/admin/inventory")
+                } else {
+                  console.log(`Navigate to ${feature.title}`)
+                }
               }}
             >
               <View style={[styles.featureIcon, { backgroundColor: feature.color }]}>

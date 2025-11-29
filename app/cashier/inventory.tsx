@@ -1,17 +1,135 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native"
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
+import { useState, useEffect, useContext } from "react"
 import Sidebar from "../../components/Sidebar"
 import Header from "../../components/Header"
-import { menuItems } from "../../utils/constants"
+import { supabase } from "../../utils/supabaseClient"
+import { InventoryRefreshContext } from "./index"
+
+interface InventoryItem {
+  product_id: number
+  name: string
+  price: number
+  category_name: string
+  quantity_in_stock: number
+  minimum_threshold: number
+  last_restock_date: string | null
+  last_updated: string
+}
 
 export default function Inventory() {
-  // Sample inventory data with stock levels
-  const inventoryData = menuItems.map((item) => ({
-    ...item,
-    stock: Math.floor(Math.random() * 100) + 10, // Random stock between 10-110
-    lowStockThreshold: 20,
-    lastRestocked: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000), // Random date within last week
-  }))
+  const [inventoryData, setInventoryData] = useState<InventoryItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [retryTrigger, setRetryTrigger] = useState(0)
+
+  const { setRefreshInventory } = useContext(InventoryRefreshContext)
+
+  // Register refresh function with context
+  useEffect(() => {
+    const refreshFn = () => {
+      console.log("🔄 Inventory refresh triggered!")
+      setRetryTrigger(prev => prev + 1)
+    }
+    setRefreshInventory(() => refreshFn)
+    console.log("📝 Inventory refresh function registered")
+    return () => {
+      setRefreshInventory(undefined)
+      console.log("📝 Inventory refresh function unregistered")
+    }
+  }, [setRefreshInventory])
+
+  useEffect(() => {
+    const fetchInventory = async () => {
+      console.log(`📦 Fetching inventory data (trigger: ${retryTrigger})...`)
+      setLoading(true)
+      setError(null)
+
+      try {
+        // First, get all active products
+        const { data: activeProducts, error: productsError } = await supabase
+          .from("product")
+          .select(`
+            product_id,
+            name,
+            price,
+            category:category(name)
+          `)
+          .eq("is_active", true)
+
+        if (productsError) throw productsError
+
+        // Then get inventory data for these products
+        const productIds = activeProducts?.map(p => p.product_id) || []
+        const { data: inventoryData, error: inventoryError } = await supabase
+          .from("inventory")
+          .select(`
+            product_id,
+            quantity_in_stock,
+            minimum_threshold,
+            last_restock_date,
+            last_updated
+          `)
+          .in("product_id", productIds)
+
+        if (inventoryError) throw inventoryError
+
+        // Create inventory map for quick lookup
+        const inventoryMap = new Map()
+        inventoryData?.forEach(inv => {
+          inventoryMap.set(inv.product_id, inv)
+        })
+
+        if (error) {
+          setError("Failed to load inventory data")
+          console.error("Inventory fetch error:", error)
+          return
+        }
+
+        console.log(`📊 Active products:`, activeProducts?.slice(0, 3).map((p: any) => ({
+          product_id: p.product_id,
+          name: p.name
+        })))
+        console.log(`📦 Inventory records:`, inventoryData?.slice(0, 3).map((inv: any) => ({
+          product_id: inv.product_id,
+          quantity_in_stock: inv.quantity_in_stock
+        })))
+
+        // Format data by merging products with inventory
+        const formattedData: InventoryItem[] = (activeProducts || []).map((product: any) => {
+          const inventory = inventoryMap.get(product.product_id)
+          return {
+            product_id: product.product_id,
+            name: product.name,
+            price: product.price,
+            category_name: product.category?.name || "Uncategorized",
+            quantity_in_stock: inventory?.quantity_in_stock || 0,
+            minimum_threshold: inventory?.minimum_threshold || 10,
+            last_restock_date: inventory?.last_restock_date,
+            last_updated: inventory?.last_updated || new Date().toISOString(),
+          }
+        })
+
+        console.log(`✅ Formatted inventory data:`, formattedData.slice(0, 3).map(item => ({
+          id: item.product_id,
+          name: item.name,
+          stock: item.quantity_in_stock
+        })))
+
+        setInventoryData(formattedData)
+
+        setInventoryData(formattedData)
+      } catch (err) {
+        setError("An unexpected error occurred")
+        console.error("Inventory fetch error:", err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchInventory()
+  }, [retryTrigger])
+
 
   const getStockStatus = (stock: number, threshold: number) => {
     if (stock <= threshold) return "low"
@@ -32,9 +150,41 @@ export default function Inventory() {
     }
   }
 
-  const lowStockItems = inventoryData.filter((item) => item.stock <= item.lowStockThreshold)
+  const lowStockItems = inventoryData.filter((item) => item.quantity_in_stock <= item.minimum_threshold)
   const totalItems = inventoryData.length
-  const totalValue = inventoryData.reduce((sum, item) => sum + item.price * item.stock, 0)
+  const totalValue = inventoryData.reduce((sum, item) => sum + item.price * item.quantity_in_stock, 0)
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <Sidebar />
+        <View style={[styles.content, { justifyContent: "center", alignItems: "center" }]}>
+          <ActivityIndicator size="large" color="#F97316" />
+          <Text style={{ marginTop: 16, fontSize: 16, color: "#6B7280" }}>Loading inventory...</Text>
+        </View>
+      </View>
+    )
+  }
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Sidebar />
+        <View style={[styles.content, { justifyContent: "center", alignItems: "center" }]}>
+          <Ionicons name="alert-circle" size={48} color="#EF4444" />
+          <Text style={{ marginTop: 16, fontSize: 16, color: "#EF4444", textAlign: "center" }}>
+            {error}
+          </Text>
+          <TouchableOpacity
+            style={{ marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: "#F97316", borderRadius: 8 }}
+            onPress={() => setRetryTrigger(prev => prev + 1)}
+          >
+            <Text style={{ color: "#FFFFFF", fontWeight: "600" }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    )
+  }
 
   return (
     <View style={styles.container}>
@@ -81,9 +231,9 @@ export default function Inventory() {
               </View>
               <View style={styles.alertItems}>
                 {lowStockItems.map((item) => (
-                  <View key={item.id} style={styles.alertItem}>
+                  <View key={item.product_id} style={styles.alertItem}>
                     <Text style={styles.alertItemName}>{item.name}</Text>
-                    <Text style={styles.alertItemStock}>{item.stock} remaining</Text>
+                    <Text style={styles.alertItemStock}>{item.quantity_in_stock} remaining</Text>
                   </View>
                 ))}
               </View>
@@ -94,34 +244,29 @@ export default function Inventory() {
           <View style={styles.inventoryList}>
             <Text style={styles.sectionTitle}>All Items</Text>
             {inventoryData.map((item) => {
-              const stockStatus = getStockStatus(item.stock, item.lowStockThreshold)
+              const stockStatus = getStockStatus(item.quantity_in_stock, item.minimum_threshold)
               const stockColor = getStockColor(stockStatus)
 
               return (
-                <View key={item.id} style={styles.inventoryItem}>
+                <View key={item.product_id} style={styles.inventoryItem}>
                   <View style={styles.itemLeft}>
                     <View style={styles.itemImage}>
                       <Text style={styles.itemImageText}>🍔</Text>
                     </View>
                     <View style={styles.itemDetails}>
                       <Text style={styles.itemName}>{item.name}</Text>
-                      <Text style={styles.itemCategory}>{item.category}</Text>
+                      <Text style={styles.itemCategory}>{item.category_name}</Text>
                       <Text style={styles.itemPrice}>₱{item.price.toFixed(2)}</Text>
                     </View>
                   </View>
 
                   <View style={styles.itemRight}>
                     <View style={styles.stockInfo}>
-                      <Text style={[styles.stockNumber, { color: stockColor }]}>{item.stock}</Text>
+                      <Text style={[styles.stockNumber, { color: stockColor }]}>{item.quantity_in_stock}</Text>
                       <Text style={styles.stockLabel}>in stock</Text>
                     </View>
 
                     <View style={[styles.stockIndicator, { backgroundColor: stockColor }]} />
-
-                    <TouchableOpacity style={styles.restockButton}>
-                      <Ionicons name="add-circle-outline" size={20} color="#F97316" />
-                      <Text style={styles.restockText}>Restock</Text>
-                    </TouchableOpacity>
                   </View>
                 </View>
               )
@@ -129,6 +274,7 @@ export default function Inventory() {
           </View>
         </ScrollView>
       </View>
+
     </View>
   )
 }
@@ -321,20 +467,5 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-  },
-  restockButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#F97316",
-  },
-  restockText: {
-    fontSize: 14,
-    color: "#F97316",
-    fontWeight: "600",
   },
 })

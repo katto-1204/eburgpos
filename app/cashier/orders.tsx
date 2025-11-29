@@ -1,48 +1,103 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
+import { useState, useEffect } from "react"
 import Sidebar from "../../components/Sidebar"
 import Header from "../../components/Header"
 import type { CompletedOrder } from "../../types"
+import { supabase } from "../../utils/supabaseClient"
 
 export default function OrderHistory() {
-  // Sample order history data
-  const orderHistory: CompletedOrder[] = [
-    {
-      id: "2127",
-      customerName: "John Doe",
-      items: [
-        { id: "1", name: "Minute Burger", category: "Sulit Sandwiches", price: 89.0, image: "", quantity: 2 },
-        { id: "9", name: "Calamantea", category: "Beverages", price: 24.0, image: "", quantity: 1 },
-      ],
-      total: 202.0,
-      orderType: "Take Out",
-      timestamp: new Date(Date.now() - 3600000),
-      status: "Completed",
-    },
-    {
-      id: "2126",
-      customerName: "Jane Smith",
-      items: [
-        { id: "3", name: "Bacon Cheese Burger", category: "Big Time Burgers", price: 96.0, image: "", quantity: 1 },
-      ],
-      total: 102.0,
-      orderType: "Dine In",
-      timestamp: new Date(Date.now() - 7200000),
-      status: "Completed",
-    },
-    {
-      id: "2125",
-      customerName: "Mike Johnson",
-      items: [
-        { id: "5", name: "Steak Burger", category: "Big Time Burgers", price: 136.0, image: "", quantity: 1 },
-        { id: "10", name: "Iced Choco", category: "Beverages", price: 23.0, image: "", quantity: 2 },
-      ],
-      total: 182.0,
-      orderType: "Dine In",
-      timestamp: new Date(Date.now() - 10800000),
-      status: "Completed",
-    },
-  ]
+  const [orders, setOrders] = useState<CompletedOrder[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const fetchOrders = async () => {
+      setLoading(true)
+      setError(null)
+
+      try {
+        // Fetch orders with their order_product items
+        const { data: orderRows, error } = await supabase
+          .from("orders")
+          .select("order_id, customer_name, total_amount, order_date, status, notes")
+          .order("order_date", { ascending: false })
+
+        if (error) {
+          console.error("Error fetching orders:", error)
+          setError("Failed to load orders")
+          return
+        }
+
+        if (!orderRows || orderRows.length === 0) {
+          setOrders([])
+          return
+        }
+
+        // Build complete order objects with items
+        const builtOrders: CompletedOrder[] = []
+
+        for (const row of orderRows) {
+          // Fetch order items for this order
+          const { data: itemRows, error: itemsError } = await supabase
+            .from("order_product")
+            .select("product_id, quantity, unit_price")
+            .eq("order_id", row.order_id)
+
+          if (itemsError) {
+            console.error("Error fetching order items for order", row.order_id, itemsError)
+            continue
+          }
+
+          // Get product details for each item
+          const items = []
+          for (const itemRow of itemRows || []) {
+            const { data: productData, error: productError } = await supabase
+              .from("product")
+              .select("name, category:category(name)")
+              .eq("product_id", itemRow.product_id)
+              .maybeSingle()
+
+            if (productError || !productData) {
+              console.warn("Product not found for ID:", itemRow.product_id)
+              continue
+            }
+
+            items.push({
+              id: String(itemRow.product_id),
+              name: productData.name,
+              category: (productData.category as any)?.name || "Uncategorized",
+              price: itemRow.unit_price,
+              image: "",
+              quantity: itemRow.quantity,
+            })
+          }
+
+          // Determine order type from notes field
+          const orderType = (row.notes === "Take Out" ? "Take Out" : "Dine In") as "Dine In" | "Take Out"
+
+          builtOrders.push({
+            id: String(row.order_id),
+            customerName: row.customer_name || "Walk-in Customer",
+            items,
+            total: row.total_amount,
+            orderType,
+            timestamp: new Date(row.order_date),
+            status: (row.status as "Completed" | "Pending" | "Cancelled") || "Completed",
+          })
+        }
+
+        setOrders(builtOrders)
+      } catch (err) {
+        console.error("Unexpected error fetching orders:", err)
+        setError("An unexpected error occurred")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchOrders()
+  }, [])
 
   return (
     <View style={styles.container}>
@@ -59,56 +114,78 @@ export default function OrderHistory() {
         </View>
 
         <ScrollView style={styles.ordersContainer} showsVerticalScrollIndicator={false}>
-          {orderHistory.map((order) => (
-            <View key={order.id} style={styles.orderCard}>
-              <View style={styles.orderCardHeader}>
-                <View>
-                  <Text style={styles.orderNumber}>Order #{order.id}</Text>
-                  <Text style={styles.customerName}>{order.customerName}</Text>
-                </View>
-                <View style={styles.orderCardRight}>
-                  <Text style={styles.orderTotal}>₱{order.total.toFixed(2)}</Text>
-                  <Text style={styles.orderType}>{order.orderType}</Text>
-                </View>
-              </View>
-
-              <Text style={styles.orderTimestamp}>{order.timestamp.toLocaleString()}</Text>
-
-              <View style={styles.orderItems}>
-                {order.items.map((item) => (
-                  <View key={item.id} style={styles.orderItemRow}>
-                    <Text style={styles.orderItemText}>
-                      {item.quantity}x {item.name}
-                    </Text>
-                    <Text style={styles.orderItemPrice}>₱{(item.price * item.quantity).toFixed(2)}</Text>
+          {loading ? (
+            <View style={{ alignItems: "center", paddingVertical: 40 }}>
+              <ActivityIndicator size="large" color="#F97316" />
+              <Text style={{ marginTop: 16, fontSize: 16, color: "#6B7280" }}>Loading orders...</Text>
+            </View>
+          ) : error ? (
+            <View style={{ alignItems: "center", paddingVertical: 40 }}>
+              <Ionicons name="alert-circle" size={48} color="#EF4444" />
+              <Text style={{ marginTop: 16, fontSize: 16, color: "#EF4444", textAlign: "center" }}>
+                {error}
+              </Text>
+            </View>
+          ) : orders.length === 0 ? (
+            <View style={{ alignItems: "center", paddingVertical: 40 }}>
+              <Ionicons name="receipt-outline" size={48} color="#9CA3AF" />
+              <Text style={{ marginTop: 16, fontSize: 16, color: "#6B7280" }}>No orders found</Text>
+              <Text style={{ marginTop: 8, fontSize: 14, color: "#9CA3AF", textAlign: "center" }}>
+                Confirmed orders will appear here
+              </Text>
+            </View>
+          ) : (
+            orders.map((order) => (
+              <View key={order.id} style={styles.orderCard}>
+                <View style={styles.orderCardHeader}>
+                  <View>
+                    <Text style={styles.orderNumber}>Order #{order.id}</Text>
+                    <Text style={styles.customerName}>{order.customerName}</Text>
                   </View>
-                ))}
-              </View>
+                  <View style={styles.orderCardRight}>
+                    <Text style={styles.orderTotal}>₱{order.total.toFixed(2)}</Text>
+                    <Text style={styles.orderType}>{order.orderType}</Text>
+                  </View>
+                </View>
 
-              <View style={styles.orderFooter}>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    order.status === "Completed" ? styles.statusCompleted : styles.statusPending,
-                  ]}
-                >
-                  <Text
+                <Text style={styles.orderTimestamp}>{order.timestamp.toLocaleString()}</Text>
+
+                <View style={styles.orderItems}>
+                  {order.items.map((item) => (
+                    <View key={item.id} style={styles.orderItemRow}>
+                      <Text style={styles.orderItemText}>
+                        {item.quantity}x {item.name}
+                      </Text>
+                      <Text style={styles.orderItemPrice}>₱{(item.price * item.quantity).toFixed(2)}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.orderFooter}>
+                  <View
                     style={[
-                      styles.statusText,
-                      order.status === "Completed" ? styles.statusTextCompleted : styles.statusTextPending,
+                      styles.statusBadge,
+                      order.status === "Completed" ? styles.statusCompleted : styles.statusPending,
                     ]}
                   >
-                    {order.status}
-                  </Text>
-                </View>
+                    <Text
+                      style={[
+                        styles.statusText,
+                        order.status === "Completed" ? styles.statusTextCompleted : styles.statusTextPending,
+                      ]}
+                    >
+                      {order.status}
+                    </Text>
+                  </View>
 
-                <TouchableOpacity style={styles.viewButton}>
-                  <Text style={styles.viewButtonText}>View Details</Text>
-                  <Ionicons name="chevron-forward" size={16} color="#F97316" />
-                </TouchableOpacity>
+                  <TouchableOpacity style={styles.viewButton}>
+                    <Text style={styles.viewButtonText}>View Details</Text>
+                    <Ionicons name="chevron-forward" size={16} color="#F97316" />
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
-          ))}
+            ))
+          )}
         </ScrollView>
       </View>
     </View>
