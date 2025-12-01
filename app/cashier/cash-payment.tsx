@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, Modal } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, TextInput, Modal, ActivityIndicator } from "react-native"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 
@@ -13,10 +13,11 @@ interface CashPaymentProps {
 export default function CashPayment({ visible, onClose, totalAmount, onPaymentComplete }: CashPaymentProps) {
   const [amountReceived, setAmountReceived] = useState("")
   const [error, setError] = useState("")
+  const [isProcessing, setIsProcessing] = useState(false)
 
   const change = parseFloat(amountReceived) - totalAmount
 
-  const handlePay = () => {
+  const handlePay = async () => {
     const received = parseFloat(amountReceived)
     if (!amountReceived || isNaN(received) || received <= 0) {
       setError("Please enter a valid amount")
@@ -26,8 +27,15 @@ export default function CashPayment({ visible, onClose, totalAmount, onPaymentCo
       setError("Amount received is less than total amount")
       return
     }
+    
+    setIsProcessing(true)
     setError("")
-    onPaymentComplete(received, change)
+    
+    // Small delay to show loading state
+    setTimeout(() => {
+      onPaymentComplete(received, change)
+      setIsProcessing(false)
+    }, 500)
   }
 
   return (
@@ -70,8 +78,12 @@ export default function CashPayment({ visible, onClose, totalAmount, onPaymentCo
               </View>
             )}
 
-            <TouchableOpacity style={styles.payButton} onPress={handlePay}>
-              <Text style={styles.payButtonText}>PAY ₱{totalAmount.toFixed(2)}</Text>
+            <TouchableOpacity style={styles.payButton} onPress={handlePay} disabled={isProcessing}>
+              {isProcessing ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.payButtonText}>PAY ₱{totalAmount.toFixed(2)}</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>

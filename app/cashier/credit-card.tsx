@@ -1,5 +1,5 @@
 import { useState, useRef } from "react"
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, Modal, ScrollView } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, TextInput, Modal, ScrollView, ActivityIndicator } from "react-native"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import FlippingCard from "../../components/FlippingCard"
@@ -28,6 +28,7 @@ export default function CreditCardPayment({
   const [transactionId, setTransactionId] = useState("")
   const [errors, setErrors] = useState<{ [key: string]: string }>({})
   const [isFlipped, setIsFlipped] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
 
   const formatCardNumber = (text: string) => {
     const digits = text.replace(/\s/g, "").slice(0, 16)
@@ -94,39 +95,64 @@ export default function CreditCardPayment({
       return
     }
 
-    // Generate transaction ID
-    const txId = `CC-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
-    setTransactionId(txId)
+    setIsProcessing(true)
 
     try {
-      // Record payment to database
-      if (orderId) {
-        const { error } = await supabase.from("payment").insert({
-          order_id: orderId,
-          payment_date: new Date().toISOString(),
-          amount_paid: totalAmount,
-          payment_method: "Credit Card",
-          payment_status: "Completed",
-          transaction_id: txId,
-          card_last_4: cardNumber.replace(/\s/g, "").slice(-4),
-          cardholder_name: cardName,
-        })
+      // Validate card details (simulate API call)
+      const cardDigits = cardNumber.replace(/\s/g, "")
+      const isValidCard = cardDigits.length === 16 && !isNaN(parseInt(cardDigits))
+      const isValidCVV = cvv.length === 3 && !isNaN(parseInt(cvv))
+      const isValidExpiry = expiry.length === 5 && expiry.includes("/")
+      const isValidName = cardName.trim().length > 0
 
-        if (error) {
-          console.error("Error recording payment:", error)
-        }
+      if (!isValidCard || !isValidCVV || !isValidExpiry || !isValidName) {
+        setErrors({
+          cardNumber: !isValidCard ? "Invalid card number" : "",
+          expiry: !isValidExpiry ? "Invalid expiry date" : "",
+          cvv: !isValidCVV ? "Invalid CVV" : "",
+          cardName: !isValidName ? "Invalid cardholder name" : "",
+        })
+        setIsProcessing(false)
+        return
       }
 
+      // Generate transaction ID
+      const txId = `CC-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
+      setTransactionId(txId)
+
+      // Show success immediately
       setShowSuccess(true)
+
+      // Record payment in background (non-blocking)
+      if (orderId) {
+        // Fire and forget - don't await
+        supabase
+          .from("payment")
+          .insert({
+            order_id: orderId,
+            payment_date: new Date().toISOString(),
+            amount_paid: totalAmount,
+            payment_method: "Credit Card",
+            payment_status: "Completed",
+            transaction_id: txId,
+            card_last_4: cardDigits.slice(-4),
+            cardholder_name: cardName,
+          })
+          .catch((error) => {
+            console.error("Background payment recording error:", error)
+          })
+      }
 
       // Auto-close after 2 seconds
       setTimeout(() => {
         setShowSuccess(false)
+        setIsProcessing(false)
         onPaymentComplete(txId)
         onClose()
       }, 2000)
     } catch (error) {
       console.error("Payment error:", error)
+      setIsProcessing(false)
     }
   }
 
@@ -215,8 +241,12 @@ export default function CreditCardPayment({
                   <Text style={styles.amount}>${totalAmount.toFixed(2)}</Text>
                 </View>
 
-                <TouchableOpacity style={styles.payButton} onPress={handlePay}>
-                  <Text style={styles.payButtonText}>Pay ${totalAmount.toFixed(2)}</Text>
+                <TouchableOpacity style={styles.payButton} onPress={handlePay} disabled={isProcessing}>
+                  {isProcessing ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.payButtonText}>Pay ${totalAmount.toFixed(2)}</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </ScrollView>

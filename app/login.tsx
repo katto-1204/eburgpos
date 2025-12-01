@@ -5,6 +5,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ImageBackgr
 import { LinearGradient } from "expo-linear-gradient"
 import { router, useLocalSearchParams } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
+import AsyncStorage from "@react-native-async-storage/async-storage"
 
 export default function LoginScreen() {
   const { role } = useLocalSearchParams()
@@ -18,7 +19,7 @@ export default function LoginScreen() {
     }
   }, [role])
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!username || !password) {
       Alert.alert("Error", "Please enter both username and password")
       return
@@ -26,8 +27,12 @@ export default function LoginScreen() {
 
     // Simple authentication logic
     if (selectedRole === "admin" && username === "admin" && password === "admin123") {
-      router.replace("/admin")
+      // Store role in AsyncStorage
+      await AsyncStorage.setItem("userRole", "admin")
+      router.replace("/cashier")
     } else if (selectedRole === "cashier" && username === "cashier" && password === "cashier123") {
+      // Store role in AsyncStorage
+      await AsyncStorage.setItem("userRole", "cashier")
       router.replace("/cashier")
     } else {
       Alert.alert("Error", "Invalid credentials")

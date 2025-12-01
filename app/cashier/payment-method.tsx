@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, Modal } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView } from "react-native"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 
@@ -49,10 +49,9 @@ export default function PaymentMethodModal({
                 }}
               >
                 <View style={[styles.methodIcon, { backgroundColor: method.color }]}>
-                  <Ionicons name={method.icon as any} size={24} color="#FFFFFF" />
+                  <Ionicons name={method.icon as any} size={32} color="#FFFFFF" />
                 </View>
                 <Text style={styles.methodName}>{method.name}</Text>
-                <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
               </TouchableOpacity>
             ))}
           </View>
@@ -108,31 +107,36 @@ const styles = StyleSheet.create({
     color: "#1F2937",
   },
   methodsContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 12,
+    justifyContent: "space-between",
   },
   methodButton: {
-    flexDirection: "row",
+    width: "48%",
     alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "#FFFFFF",
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: "#E5E7EB",
     borderLeftWidth: 4,
     borderRadius: 12,
-    padding: 16,
-    gap: 16,
+    padding: 20,
+    minHeight: 140,
   },
   methodIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     justifyContent: "center",
     alignItems: "center",
+    marginBottom: 12,
   },
   methodName: {
-    flex: 1,
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "600",
     color: "#1F2937",
+    textAlign: "center",
   },
 })
 

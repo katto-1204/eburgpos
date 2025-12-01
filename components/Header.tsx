@@ -6,9 +6,10 @@ interface HeaderProps {
   searchQuery?: string
   onSearchChange?: (query: string) => void
   showSearch?: boolean
+  userRole?: "admin" | "cashier"
 }
 
-export default function Header({ searchQuery = "", onSearchChange, showSearch = true }: HeaderProps) {
+export default function Header({ searchQuery = "", onSearchChange, showSearch = true, userRole = "cashier" }: HeaderProps) {
   return (
     <View style={[styles.header, !showSearch && styles.headerFixed]}>
       <View style={styles.headerLeft}>
@@ -33,8 +34,10 @@ export default function Header({ searchQuery = "", onSearchChange, showSearch = 
       )}
 
       <View style={styles.headerRight}>
-        <TouchableOpacity style={styles.cashierButton}>
-          <Text style={styles.cashierButtonText}>CASHIER</Text>
+        <TouchableOpacity style={userRole === "admin" ? styles.adminButton : styles.cashierButton}>
+          <Text style={userRole === "admin" ? styles.adminButtonText : styles.cashierButtonText}>
+            {userRole === "admin" ? "ADMIN" : "CASHIER"}
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.logoutButton} onPress={() => router.replace("/")}>
           <Ionicons name="log-out-outline" size={16} color="#6B7280" />
@@ -81,8 +84,8 @@ const styles = StyleSheet.create({
     height: 30,
   },
   brandImage: {
-    width: 30,
-    height: 30,
+    width: 120,
+    height: 100,
   },
   searchContainer: {
     flex: 1,
@@ -116,6 +119,17 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   cashierButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "bold",
+    fontSize: 14,
+  },
+  adminButton: {
+    backgroundColor: "#92400E",
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  adminButtonText: {
     color: "#FFFFFF",
     fontWeight: "bold",
     fontSize: 14,

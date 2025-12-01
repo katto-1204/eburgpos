@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Image } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Image, ActivityIndicator } from "react-native"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { supabase } from "../../utils/supabaseClient"
@@ -22,6 +22,7 @@ export default function GCashPayment({
   const [showQRModal, setShowQRModal] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
   const [transactionId, setTransactionId] = useState("")
+  const [isProcessing, setIsProcessing] = useState(false)
 
   useEffect(() => {
     if (visible) {
@@ -30,38 +31,52 @@ export default function GCashPayment({
   }, [visible])
 
   const handleConfirmPayment = async () => {
-    // Generate transaction ID
-    const txId = `GC-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
-    setTransactionId(txId)
+    setIsProcessing(true)
 
     try {
-      // Record payment to database
-      if (orderId) {
-        const { error } = await supabase.from("payment").insert({
-          order_id: orderId,
-          payment_date: new Date().toISOString(),
-          amount_paid: totalAmount,
-          payment_method: "GCash",
-          payment_status: "Completed",
-          transaction_id: txId,
-        })
-
-        if (error) {
-          console.error("Error recording payment:", error)
-        }
+      // Validate GCash transaction (simulate validation)
+      if (!totalAmount || totalAmount <= 0) {
+        console.error("Invalid amount")
+        setIsProcessing(false)
+        return
       }
 
+      // Generate transaction ID
+      const txId = `GC-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
+      setTransactionId(txId)
+
+      // Hide QR modal and show success immediately
       setShowQRModal(false)
       setShowSuccess(true)
+
+      // Record payment in background (non-blocking)
+      if (orderId) {
+        // Fire and forget - don't await
+        supabase
+          .from("payment")
+          .insert({
+            order_id: orderId,
+            payment_date: new Date().toISOString(),
+            amount_paid: totalAmount,
+            payment_method: "GCash",
+            payment_status: "Completed",
+            transaction_id: txId,
+          })
+          .catch((error) => {
+            console.error("Background payment recording error:", error)
+          })
+      }
 
       // Auto-close after 2 seconds
       setTimeout(() => {
         setShowSuccess(false)
+        setIsProcessing(false)
         onPaymentComplete(txId)
         onClose()
       }, 2000)
     } catch (error) {
       console.error("Payment error:", error)
+      setIsProcessing(false)
     }
   }
 
@@ -83,19 +98,20 @@ export default function GCashPayment({
             <View style={styles.qrContent}>
               <Text style={styles.scanText}>SCAN TO PAY HERE</Text>
 
-              {/* QR Code Placeholder */}
+              {/* QR Code */}
               <View style={styles.qrCodeContainer}>
-                <View style={styles.qrCode}>
-                  <Text style={styles.qrPlaceholder}>QR CODE</Text>
-                  <Text style={styles.qrAmount}>₱{totalAmount.toFixed(2)}</Text>
-                </View>
+                <Image source={require("../../images/qr.png")} style={styles.qrCode} resizeMode="contain" />
               </View>
 
               <Text style={styles.merchantText}>Dragonpay</Text>
               <Text style={styles.amountText}>PHP {totalAmount.toFixed(2)}</Text>
 
-              <TouchableOpacity style={styles.payButton} onPress={handleConfirmPayment}>
-                <Text style={styles.payButtonText}>PAY PHP {totalAmount.toFixed(2)}</Text>
+              <TouchableOpacity style={styles.payButton} onPress={handleConfirmPayment} disabled={isProcessing}>
+                {isProcessing ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.payButtonText}>PAY PHP {totalAmount.toFixed(2)}</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -141,8 +157,12 @@ export default function GCashPayment({
                 <Text style={styles.confirmAmount}>PHP {totalAmount.toFixed(2)}</Text>
               </View>
 
-              <TouchableOpacity style={styles.confirmPayButton} onPress={handleConfirmPayment}>
-                <Text style={styles.confirmPayButtonText}>PAY PHP {totalAmount.toFixed(2)}</Text>
+              <TouchableOpacity style={styles.confirmPayButton} onPress={handleConfirmPayment} disabled={isProcessing}>
+                {isProcessing ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.confirmPayButtonText}>PAY PHP {totalAmount.toFixed(2)}</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -215,11 +235,6 @@ const styles = StyleSheet.create({
   qrCode: {
     width: 200,
     height: 200,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
   },
   qrPlaceholder: {
     fontSize: 18,

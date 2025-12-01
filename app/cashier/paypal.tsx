@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, Modal, ScrollView } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, TextInput, Modal, ScrollView, ActivityIndicator } from "react-native"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { supabase } from "../../utils/supabaseClient"
@@ -25,6 +25,7 @@ export default function PayPalPayment({
   const [showSuccess, setShowSuccess] = useState(false)
   const [transactionId, setTransactionId] = useState("")
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({})
+  const [isProcessing, setIsProcessing] = useState(false)
 
   const handleLogin = () => {
     const newErrors: { email?: string; password?: string } = {}
@@ -41,6 +42,8 @@ export default function PayPalPayment({
   }
 
   const handlePay = async () => {
+    setIsProcessing(true)
+
     // Generate transaction ID
     const txId = `PP-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
     setTransactionId(txId)
@@ -69,11 +72,13 @@ export default function PayPalPayment({
       // Auto-close after 2 seconds
       setTimeout(() => {
         setShowSuccess(false)
+        setIsProcessing(false)
         onPaymentComplete(txId)
         onClose()
       }, 2000)
     } catch (error) {
       console.error("Payment error:", error)
+      setIsProcessing(false)
     }
   }
 
@@ -172,8 +177,12 @@ export default function PayPalPayment({
                   <Text style={styles.amount}>${totalAmount.toFixed(2)}</Text>
                 </View>
 
-                <TouchableOpacity style={styles.payButton} onPress={handlePay}>
-                  <Text style={styles.payButtonText}>Pay ${totalAmount.toFixed(2)}</Text>
+                <TouchableOpacity style={styles.payButton} onPress={handlePay} disabled={isProcessing}>
+                  {isProcessing ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.payButtonText}>Pay ${totalAmount.toFixed(2)}</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </ScrollView>

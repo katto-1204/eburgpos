@@ -1,5 +1,8 @@
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Alert } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Alert, ActivityIndicator } from "react-native"
+import { useState } from "react"
 import { Ionicons } from "@expo/vector-icons"
+import * as Print from "expo-print"
+import * as Sharing from "expo-sharing"
 import type { OrderItem } from "../../types"
 
 interface ReceiptModalProps {
@@ -31,45 +34,151 @@ export default function ReceiptModal({
   customerName,
   orderDate,
 }: ReceiptModalProps) {
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
   const handleDownload = async () => {
     try {
-      // Create receipt text
-      let receiptText = "================================\n"
-      receiptText += "      MINUTE BURGER\n"
-      receiptText += "      Best Ang Sarap\n"
-      receiptText += "================================\n\n"
-      receiptText += `Order #${orderNumber}\n`
-      receiptText += `Date: ${orderDate.toLocaleString()}\n`
-      receiptText += `Customer: ${customerName}\n`
-      receiptText += `Payment: ${paymentMethod}\n`
-      if (transactionId) {
-        receiptText += `Transaction ID: ${transactionId}\n`
-      }
-      receiptText += "--------------------------------\n\n"
-      receiptText += "ITEMS:\n"
-      orderItems.forEach((item) => {
-        receiptText += `${item.name} x${item.quantity} - ₱${(item.price * item.quantity).toFixed(2)}\n`
-      })
-      receiptText += "--------------------------------\n"
-      receiptText += `Subtotal: ₱${subtotal.toFixed(2)}\n`
-      receiptText += `Tax: ₱${tax.toFixed(2)}\n`
-      if (discount > 0) {
-        receiptText += `Discount: -₱${discount.toFixed(2)}\n`
-      }
-      receiptText += "--------------------------------\n"
-      receiptText += `TOTAL: ₱${total.toFixed(2)}\n`
-      receiptText += "================================\n\n"
-      receiptText += "Thank you for your order!\n"
-      receiptText += "Please come again\n"
+      setIsGeneratingPDF(true)
 
-      // For now, show an alert with the receipt text
-      // In a production app, you would use expo-print or expo-file-system to save/share
-      Alert.alert("Receipt", receiptText, [
-        { text: "OK", onPress: () => {} },
-      ])
+      // Create itemized HTML for PDF
+      const itemsHTML = orderItems
+        .map(
+          (item) =>
+            `<tr>
+              <td style="text-align: left; padding: 8px 4px;">${item.name}</td>
+              <td style="text-align: center; padding: 8px 4px;">x${item.quantity}</td>
+              <td style="text-align: right; padding: 8px 4px;">₱${(item.price * item.quantity).toFixed(2)}</td>
+            </tr>`
+        )
+        .join("")
+
+      // Create HTML for PDF
+      const htmlContent = `
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                width: 80mm;
+                margin: 0;
+                padding: 10mm;
+              }
+              .receipt {
+                text-align: center;
+              }
+              .header {
+                margin-bottom: 10px;
+              }
+              .store-name {
+                font-size: 16px;
+                font-weight: bold;
+                margin-bottom: 4px;
+              }
+              .store-tagline {
+                font-size: 10px;
+                color: #666;
+              }
+              .divider {
+                border-top: 1px dashed #000;
+                margin: 10px 0;
+              }
+              .info-row {
+                font-size: 10px;
+                text-align: left;
+                margin-bottom: 4px;
+              }
+              .label {
+                font-weight: bold;
+              }
+              table {
+                width: 100%;
+                font-size: 10px;
+                margin: 10px 0;
+              }
+              td {
+                padding: 4px;
+              }
+              .totals {
+                text-align: right;
+                font-size: 10px;
+                margin-top: 10px;
+              }
+              .total-row {
+                margin-bottom: 4px;
+              }
+              .total-final {
+                font-size: 14px;
+                font-weight: bold;
+                margin-top: 8px;
+              }
+              .footer {
+                text-align: center;
+                font-size: 10px;
+                color: #666;
+                margin-top: 10px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="receipt">
+              <div class="header">
+                <div class="store-name">MINUTE BURGER</div>
+                <div class="store-tagline">Best Ang Sarap</div>
+              </div>
+              <div class="divider"></div>
+              <div style="text-align: left; font-size: 10px;">
+                <div class="info-row"><span class="label">Order #:</span> ${orderNumber}</div>
+                <div class="info-row"><span class="label">Date:</span> ${orderDate.toLocaleString()}</div>
+                <div class="info-row"><span class="label">Customer:</span> ${customerName}</div>
+                <div class="info-row"><span class="label">Payment:</span> ${paymentMethod}</div>
+                ${transactionId ? `<div class="info-row"><span class="label">Transaction:</span> ${transactionId}</div>` : ""}
+              </div>
+              <div class="divider"></div>
+              <table>
+                <tr style="border-bottom: 1px solid #000; font-weight: bold;">
+                  <td style="text-align: left; padding: 8px 4px;">Item</td>
+                  <td style="text-align: center; padding: 8px 4px;">Qty</td>
+                  <td style="text-align: right; padding: 8px 4px;">Amount</td>
+                </tr>
+                ${itemsHTML}
+              </table>
+              <div class="divider"></div>
+              <div class="totals">
+                <div class="total-row">Subtotal: ₱${subtotal.toFixed(2)}</div>
+                <div class="total-row">Tax: ₱${tax.toFixed(2)}</div>
+                ${discount > 0 ? `<div class="total-row">Discount: -₱${discount.toFixed(2)}</div>` : ""}
+                <div class="total-row total-final">TOTAL: ₱${total.toFixed(2)}</div>
+              </div>
+              <div class="divider"></div>
+              <div class="footer">
+                <div>Thank you for your order!</div>
+                <div>Please come again</div>
+              </div>
+            </div>
+          </body>
+        </html>
+      `
+
+      // Generate PDF
+      const { uri } = await Print.printToFileAsync({
+        html: htmlContent,
+      })
+
+      // Share the PDF
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          UTType: "com.adobe.pdf",
+          mimeType: "application/pdf",
+        })
+      } else {
+        Alert.alert("Success", `Receipt saved to: ${uri}`)
+      }
+
+      setIsGeneratingPDF(false)
     } catch (error) {
       console.error("Error generating receipt:", error)
-      Alert.alert("Error", "Failed to generate receipt")
+      Alert.alert("Error", "Failed to generate PDF receipt")
+      setIsGeneratingPDF(false)
     }
   }
 
@@ -153,9 +262,15 @@ export default function ReceiptModal({
           </ScrollView>
 
           <View style={styles.actions}>
-            <TouchableOpacity style={styles.downloadButton} onPress={handleDownload}>
-              <Ionicons name="download-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.downloadButtonText}>Download Receipt</Text>
+            <TouchableOpacity style={styles.downloadButton} onPress={handleDownload} disabled={isGeneratingPDF}>
+              {isGeneratingPDF ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons name="download-outline" size={20} color="#FFFFFF" />
+                  <Text style={styles.downloadButtonText}>Download Receipt</Text>
+                </>
+              )}
             </TouchableOpacity>
             <TouchableOpacity style={styles.closeButtonBottom} onPress={onClose}>
               <Text style={styles.closeButtonText}>Close</Text>

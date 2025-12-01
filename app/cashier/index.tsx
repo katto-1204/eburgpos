@@ -4,6 +4,7 @@ import { useState, createContext, useContext, useEffect } from "react"
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions, ActivityIndicator, TextInput, Image } from "react-native"
 import Toast from "react-native-toast-message"
 import { Ionicons } from "@expo/vector-icons"
+import AsyncStorage from "@react-native-async-storage/async-storage"
 
 import Sidebar from "../../components/Sidebar"
 import Header from "../../components/Header"
@@ -73,7 +74,7 @@ export default function CashierPOS() {
   const [selectedCategory, setSelectedCategory] = useState("All")
   const [orderItems, setOrderItems] = useState<OrderItem[]>([])
   const [orderType, setOrderType] = useState<"Dine In" | "Take Out">("Dine In")
-  const [currentOrderNumber, setCurrentOrderNumber] = useState(2128)
+  const [currentOrderNumber, setCurrentOrderNumber] = useState(0)
   const [customerName, setCustomerName] = useState("")
   const [customerPhone, setCustomerPhone] = useState("+63 9056829865")
   const [searchQuery, setSearchQuery] = useState("")
@@ -82,8 +83,9 @@ export default function CashierPOS() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [categories, setCategories] = useState<string[]>(["All"])
   const [menuLoading, setMenuLoading] = useState(true)
+  const [userRole, setUserRole] = useState<"admin" | "cashier">("cashier")
   const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false)
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<"Cash" | "Maya" | "Credit Card" | "GCash" | null>(null)
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<"Cash" | "PayPal" | "Credit Card" | "GCash" | null>(null)
   const [showCashPayment, setShowCashPayment] = useState(false)
   const [showGCashPayment, setShowGCashPayment] = useState(false)
   const [showCreditCardPayment, setShowCreditCardPayment] = useState(false)
@@ -107,6 +109,43 @@ export default function CashierPOS() {
     customerName: string
     orderDate: Date
   } | null>(null)
+
+  // Load user role from AsyncStorage
+  useEffect(() => {
+    const loadUserRole = async () => {
+      const storedRole = await AsyncStorage.getItem("userRole")
+      if (storedRole) {
+        setUserRole(storedRole as "admin" | "cashier")
+      }
+    }
+    loadUserRole()
+  }, [])
+
+  // Fetch next order number and menu items from database
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      // Fetch the next order number
+      try {
+        const { data: lastOrder, error: orderError } = await supabase
+          .from("orders")
+          .select("order_id")
+          .order("order_id", { ascending: false })
+          .limit(1)
+          .single()
+
+        if (!orderError && lastOrder) {
+          setCurrentOrderNumber(lastOrder.order_id + 1)
+        } else {
+          setCurrentOrderNumber(2128) // Default if no orders exist
+        }
+      } catch (err) {
+        console.error("Error fetching last order number:", err)
+        setCurrentOrderNumber(2128)
+      }
+    }
+
+    fetchInitialData()
+  }, [])
 
   // Fetch menu items from database
   useEffect(() => {
@@ -303,6 +342,18 @@ export default function CashierPOS() {
       return
     }
 
+    if (isConfirmingOrder) {
+      Toast.show({
+        type: "info",
+        text1: "Processing",
+        text2: "Please wait while your order is being processed",
+        visibilityTime: 2000,
+      })
+      return
+    }
+
+    setIsConfirmingOrder(true)
+
     // Calculate total and show total modal first
     const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
     const tax = 6.0
@@ -330,6 +381,7 @@ export default function CashierPOS() {
    */
   const handleContinueToPayment = () => {
     setShowTotalModal(false)
+    setIsConfirmingOrder(false)
     setShowPaymentMethodModal(true)
   }
 
@@ -351,146 +403,107 @@ export default function CashierPOS() {
     }
   }
 
-  /**
-   * Process order after payment is completed
-   */
   const processOrderWithPayment = async (paymentMethod: string, paymentData: any) => {
-    if (!pendingOrderData) return
+  if (!pendingOrderData) return;
 
-    setIsConfirmingOrder(true)
+  try {
+    const { orderItemsJson, total, customerName: custName } = pendingOrderData;
+    const orderDate = new Date().toISOString();
+    const transactionId = paymentData.transactionId || `${paymentMethod}-${Date.now()}`;
 
-    try {
-      const { orderItemsJson, total, customerName: custName } = pendingOrderData
-
-      // Prepare payment info with method and transaction data
-      const paymentInfo: any = {
-        amount_paid: total,
-        payment_method: paymentMethod,
-      }
-
-      // Add payment-specific data
-      if (paymentData.transactionId) {
-        paymentInfo.transaction_id = paymentData.transactionId
-      }
-      if (paymentData.amountReceived) {
-        paymentInfo.amount_received = paymentData.amountReceived
-      }
-      if (paymentData.change) {
-        paymentInfo.change = paymentData.change
-      }
-      if (paymentData.email) {
-        paymentInfo.email = paymentData.email
-      }
-      if (paymentData.cardLast4) {
-        paymentInfo.card_last_4 = paymentData.cardLast4
-      }
-      if (paymentData.cardholderName) {
-        paymentInfo.cardholder_name = paymentData.cardholderName
-      }
-
-      // TODO: Add cashier_id when authentication is implemented
-      // For now, we'll pass null and the function will handle it
-      // Future enhancement: Get cashier_id from authentication context
-      const cashierId = null // Replace with: useAuth()?.cashierId
-
-      console.log("🔄 Processing order with transaction function...")
-      console.log("📋 Order details:", {
-        customer: customerName || "Walk-in Customer",
-        items: orderItemsJson.length,
-        total: total,
-        orderType: orderType
+    // 1. Create order and get order_id
+    const { data: orderData, error: orderError } = await supabase
+      .from('orders')
+      .insert({
+        customer_name: custName,
+        total_amount: total,
+        order_date: orderDate,
+        status: 'Completed',
+        notes: orderType,
       })
+      .select('order_id')
+      .single();
 
-      // Call the atomic transaction function
-      const { data: result, error: transactionError } = await supabase.rpc("process_complete_order", {
-        customer_name_param: custName,
-        order_items_param: orderItemsJson,
-        payment_info_param: paymentInfo,
-        cashier_id_param: cashierId,
-      })
+    if (orderError) throw orderError;
 
-      if (transactionError) {
-        console.error("Transaction error:", transactionError)
-        Toast.show({
-          type: "error",
-          text1: "Order Failed",
-          text2: transactionError.message || "Transaction failed. Please try again.",
-          visibilityTime: 4000,
-        })
-        return
-      }
+    const orderId = orderData.order_id;
 
-      if (!result?.success) {
-        console.error("Transaction failed:", result)
-        Toast.show({
-          type: "error",
-          text1: "Order Failed",
-          text2: result?.message || "Transaction failed. Please try again.",
-          visibilityTime: 4000,
-        })
-        return
-      }
+    // 2. Insert order items in batch
+    const orderItemsWithId = orderItemsJson.map(item => ({
+      ...item,
+      order_id: orderId,
+    }));
 
-      // Transaction successful!
-      console.log("✅ Order processed successfully:", result)
+    const { error: itemsError } = await supabase
+      .from('order_product')
+      .insert(orderItemsWithId);
 
-      // Calculate totals for receipt
-      const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
-      const tax = 6.0
-      const discount = 0.0
+    if (itemsError) throw itemsError;
 
-      // Clear cart and update order number
-      const nextOrderNumber = currentOrderNumber + 1
-      setCurrentOrderNumber(nextOrderNumber)
+    // 3. Insert payment record
+    const paymentRecord = {
+      order_id: orderId,
+      payment_date: orderDate,
+      amount_paid: total,
+      payment_method: paymentMethod,
+      payment_status: 'Completed',
+      transaction_id: transactionId,
+    };
 
-      // Close payment modals
-      setShowCashPayment(false)
-      setShowGCashPayment(false)
-      setShowCreditCardPayment(false)
-      setShowPayPalPayment(false)
-      setSelectedPaymentMethod(null)
+    const { error: paymentError } = await supabase
+      .from('payment')
+      .insert(paymentRecord);
 
-      // Set completed order data for receipt
-      setCompletedOrderData({
-        orderNumber: nextOrderNumber,
-        orderItems: [...orderItems],
-        subtotal,
-        tax,
-        discount,
-        total,
-        paymentMethod,
-        transactionId: paymentData.transactionId,
-        customerName: custName,
-        orderDate: new Date(),
-      })
+    if (paymentError) throw paymentError;
 
-      // Clear cart
-      setOrderItems([])
-      setPendingOrderData(null)
+    // 4. Update UI state
+    setCurrentOrderNumber(orderId + 1);
+    setShowCashPayment(false);
+    setShowGCashPayment(false);
+    setShowCreditCardPayment(false);
+    setShowPayPalPayment(false);
+    setSelectedPaymentMethod(null);
 
-      // Show receipt modal
-      setShowReceiptModal(true)
+    // 5. Prepare receipt data
+    const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const tax = 6.0;
+    const discount = 0.0;
 
-      // Trigger inventory refresh after a brief delay
-      setTimeout(() => {
-        if (refreshInventory) {
-          console.log("🔄 Triggering inventory refresh...")
-          refreshInventory()
-        }
-      }, 500)
+    setCompletedOrderData({
+      orderNumber: orderId,
+      orderItems: [...orderItems],
+      subtotal,
+      tax,
+      discount,
+      total,
+      paymentMethod,
+      transactionId,
+      customerName: custName,
+      orderDate: new Date(),
+    });
 
-    } catch (err) {
-      console.error("Order confirmation error:", err)
-      Toast.show({
-        type: "error",
-        text1: "Order Failed",
-        text2: "Something went wrong. Please try again.",
-        visibilityTime: 4000,
-      })
-    } finally {
-      setIsConfirmingOrder(false)
+    // 6. Clear cart and show receipt
+    setOrderItems([]);
+    setPendingOrderData(null);
+    setShowReceiptModal(true);
+
+    // 7. Refresh inventory if needed
+    if (refreshInventory) {
+      refreshInventory();
     }
+
+  } catch (error) {
+    console.error('Order processing error:', error);
+    Toast.show({
+      type: 'error',
+      text1: 'Order Failed',
+      text2: 'Failed to process order. Please try again.',
+      visibilityTime: 4000,
+    });
+  } finally {
+    setIsConfirmingOrder(false);
   }
+};
 
   // Keep confirmOrder for backward compatibility (calls handleConfirmOrder)
   const confirmOrder = async () => {
@@ -526,7 +539,7 @@ export default function CashierPOS() {
       <View style={styles.container}>
         <Sidebar />
         <View style={styles.mainContent}>
-          <Header searchQuery={searchQuery} onSearchChange={setSearchQuery} />
+          <Header searchQuery={searchQuery} onSearchChange={setSearchQuery} userRole={userRole} />
 
           {/* Category Tabs */}
           <View style={styles.categoriesContainer}>
@@ -665,6 +678,7 @@ export default function CashierPOS() {
             setPendingOrderData(null)
           }}
           totalAmount={pendingOrderData.total}
+          orderId={currentOrderNumber}
           onPaymentComplete={(transactionId) => {
             processOrderWithPayment("GCash", { transactionId })
           }}
@@ -680,6 +694,7 @@ export default function CashierPOS() {
             setPendingOrderData(null)
           }}
           totalAmount={pendingOrderData.total}
+          orderId={currentOrderNumber}
           onPaymentComplete={(transactionId) => {
             processOrderWithPayment("Credit Card", { transactionId })
           }}
@@ -695,6 +710,7 @@ export default function CashierPOS() {
             setPendingOrderData(null)
           }}
           totalAmount={pendingOrderData.total}
+          orderId={currentOrderNumber}
           onPaymentComplete={(transactionId) => {
             processOrderWithPayment("PayPal", { transactionId })
           }}

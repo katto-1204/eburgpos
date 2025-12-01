@@ -12,26 +12,29 @@ export default function AdminDashboard() {
       description: "Manage staff accounts and permissions",
       icon: "people",
       color: "#3B82F6",
+      gradient: ["#3B82F6", "#1E40AF"],
     },
     {
       title: "Sales Analytics",
       description: "View detailed sales reports and analytics",
       icon: "analytics",
       color: "#10B981",
+      gradient: ["#10B981", "#047857"],
     },
     {
       title: "Menu Management",
       description: "Add, edit, or remove menu items",
       icon: "restaurant",
       color: "#F59E0B",
+      gradient: ["#F59E0B", "#D97706"],
     },
     {
       title: "Inventory Control",
       description: "Monitor and manage inventory levels",
       icon: "cube",
       color: "#8B5CF6",
+      gradient: ["#8B5CF6", "#6D28D9"],
     },
-
   ]
 
   return (
@@ -65,7 +68,8 @@ export default function AdminDashboard() {
           {adminFeatures.map((feature, index) => (
             <TouchableOpacity
               key={index}
-              style={[styles.featureCard, { borderLeftColor: feature.color }]}
+              style={styles.featureCard}
+              activeOpacity={0.7}
               onPress={() => {
                 // Navigate to specific admin feature
                 if (feature.title === "User Management") {
@@ -81,14 +85,18 @@ export default function AdminDashboard() {
                 }
               }}
             >
-              <View style={[styles.featureIcon, { backgroundColor: feature.color }]}>
-                <Ionicons name={feature.icon as any} size={24} color="#FFFFFF" />
-              </View>
-              <View style={styles.featureContent}>
-                <Text style={styles.featureTitle}>{feature.title}</Text>
-                <Text style={styles.featureDescription}>{feature.description}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+              <LinearGradient colors={feature.gradient as [string, string]} style={styles.featureCardGradient}>
+                <View style={styles.featureCardContent}>
+                  <View style={styles.featureIconContainer}>
+                    <Ionicons name={feature.icon as any} size={32} color="#FFFFFF" />
+                  </View>
+                  <View style={styles.featureContent}>
+                    <Text style={styles.featureTitle}>{feature.title}</Text>
+                    <Text style={styles.featureDescription}>{feature.description}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={24} color="#FFFFFF" style={styles.featureChevron} />
+                </View>
+              </LinearGradient>
             </TouchableOpacity>
           ))}
         </View>
@@ -98,18 +106,30 @@ export default function AdminDashboard() {
           <Text style={styles.sectionTitle}>Quick Stats</Text>
           <View style={styles.statsGrid}>
             <View style={styles.statCard}>
+              <View style={[styles.statIconBg, { backgroundColor: "#DBEAFE" }]}>
+                <Ionicons name="cash" size={24} color="#3B82F6" />
+              </View>
               <Text style={styles.statNumber}>₱25,430</Text>
               <Text style={styles.statLabel}>Today's Sales</Text>
             </View>
             <View style={styles.statCard}>
+              <View style={[styles.statIconBg, { backgroundColor: "#DCFCE7" }]}>
+                <Ionicons name="list" size={24} color="#10B981" />
+              </View>
               <Text style={styles.statNumber}>142</Text>
               <Text style={styles.statLabel}>Orders Today</Text>
             </View>
             <View style={styles.statCard}>
+              <View style={[styles.statIconBg, { backgroundColor: "#FEF3C7" }]}>
+                <Ionicons name="people" size={24} color="#F59E0B" />
+              </View>
               <Text style={styles.statNumber}>8</Text>
               <Text style={styles.statLabel}>Active Staff</Text>
             </View>
             <View style={styles.statCard}>
+              <View style={[styles.statIconBg, { backgroundColor: "#F3E8FF" }]}>
+                <Ionicons name="shield-checkmark" size={24} color="#8B5CF6" />
+              </View>
               <Text style={styles.statNumber}>95%</Text>
               <Text style={styles.statLabel}>System Uptime</Text>
             </View>
@@ -118,10 +138,13 @@ export default function AdminDashboard() {
 
         {/* Quick Access to POS */}
         <View style={styles.posSection}>
-          <TouchableOpacity style={styles.posButton} onPress={() => router.push("/cashier")}>
-            <Ionicons name="storefront" size={24} color="#FFFFFF" />
-            <Text style={styles.posButtonText}>Access POS System</Text>
-          </TouchableOpacity>
+          <LinearGradient colors={["#1F2937", "#111827"]} style={styles.posButtonGradient}>
+            <TouchableOpacity style={styles.posButton} onPress={() => router.push("/cashier")} activeOpacity={0.8}>
+              <Ionicons name="storefront" size={28} color="#FFFFFF" />
+              <Text style={styles.posButtonText}>Access POS System</Text>
+              <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          </LinearGradient>
         </View>
       </ScrollView>
     </View>
@@ -205,39 +228,47 @@ const styles = StyleSheet.create({
     marginBottom: 30,
   },
   featureCard: {
+    marginBottom: 16,
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  featureCardGradient: {
+    padding: 24,
+  },
+  featureCardContent: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    padding: 20,
-    marginBottom: 15,
-    borderRadius: 12,
-    borderLeftWidth: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    gap: 16,
   },
-  featureIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+  featureIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.25)",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 15,
   },
   featureContent: {
     flex: 1,
   },
   featureTitle: {
     fontSize: 18,
-    fontWeight: "600",
-    color: "#1F2937",
-    marginBottom: 5,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    marginBottom: 6,
   },
   featureDescription: {
-    fontSize: 14,
-    color: "#6B7280",
+    fontSize: 13,
+    color: "rgba(255, 255, 255, 0.9)",
+    lineHeight: 18,
+  },
+  featureChevron: {
+    opacity: 0.7,
   },
   statsSection: {
     marginBottom: 30,
@@ -258,40 +289,60 @@ const styles = StyleSheet.create({
     minWidth: 150,
     backgroundColor: "#FFFFFF",
     padding: 20,
-    borderRadius: 12,
+    borderRadius: 16,
     alignItems: "center",
+    justifyContent: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
     elevation: 3,
+    borderWidth: 1,
+    borderColor: "#F3F4F6",
+  },
+  statIconBg: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 12,
   },
   statNumber: {
-    fontSize: 24,
-    fontWeight: "bold",
+    fontSize: 22,
+    fontWeight: "700",
     color: "#1F2937",
-    marginBottom: 5,
+    marginBottom: 4,
   },
   statLabel: {
-    fontSize: 14,
+    fontSize: 13,
     color: "#6B7280",
+    fontWeight: "500",
   },
   posSection: {
     alignItems: "center",
     paddingBottom: 30,
   },
+  posButtonGradient: {
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
+  },
   posButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1F2937",
-    paddingHorizontal: 30,
-    paddingVertical: 15,
-    borderRadius: 25,
+    gap: 12,
+    paddingHorizontal: 32,
+    paddingVertical: 18,
+    justifyContent: "center",
   },
   posButtonText: {
-    marginLeft: 10,
     color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: 0.3,
   },
 })
