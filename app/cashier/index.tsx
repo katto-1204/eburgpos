@@ -19,6 +19,7 @@ import PayPalPayment from "./paypal"
 import TotalModal from "./total-modal"
 import ReceiptModal from "./receipt-modal"
 
+
 const { width } = Dimensions.get("window")
 
 // Calculate card width to prevent distortion - clamp between 160-220px for 4 columns
@@ -71,6 +72,7 @@ const CartContext = createContext<{
 export const useCart = () => useContext(CartContext)
 
 export default function CashierPOS() {
+  const [receiptData, setReceiptData] = useState<any>(null);
   const [selectedCategory, setSelectedCategory] = useState("All")
   const [orderItems, setOrderItems] = useState<OrderItem[]>([])
   const [orderType, setOrderType] = useState<"Dine In" | "Take Out">("Dine In")
@@ -403,107 +405,235 @@ export default function CashierPOS() {
     }
   }
 
-  const processOrderWithPayment = async (paymentMethod: string, paymentData: any) => {
-  if (!pendingOrderData) return;
+  const processOrderWithPayment = async (
+    paymentMethod: string, 
+    paymentData: { 
+      transactionId?: string; 
+      amountReceived?: number;
+      change?: number;
+      [key: string]: any 
+    } = {}
+  ) => {
+    if (!pendingOrderData) {
+      console.error('No pending order data available');
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: 'No order data available',
+        visibilityTime: 3000,
+      });
+      return { success: false, error: 'No pending order data' };
+    }
 
-  try {
-    const { orderItemsJson, total, customerName: custName } = pendingOrderData;
-    const orderDate = new Date().toISOString();
-    const transactionId = paymentData.transactionId || `${paymentMethod}-${Date.now()}`;
+    console.log('Starting payment processing for method:', paymentMethod);
+    console.log('Order total:', pendingOrderData.total);
+    
+    try {
+      const { orderItemsJson, total, customerName: custName } = pendingOrderData;
+      const orderDate = new Date().toISOString();
+      const transactionId: string = paymentData?.transactionId || `${paymentMethod}-${Date.now()}`;
+      console.log('Creating order with transaction ID:', transactionId);
 
-    // 1. Create order and get order_id
-    const { data: orderData, error: orderError } = await supabase
-      .from('orders')
-      .insert({
-        customer_name: custName,
+      // 1. Create order and get order_id
+      console.log('Creating order in database...');
+      
+      // Use the admin cashier ID which we can see is 1
+      const cashierId = 1; // From the cashier table
+      console.log('Using cashier ID:', cashierId);
+      
+      const orderData = {
+        customer_name: custName || 'Walk-in Customer',
         total_amount: total,
         order_date: orderDate,
         status: 'Completed',
         notes: orderType,
-      })
-      .select('order_id')
-      .single();
+        cashier_id: cashierId
+      };
+      
+      console.log('Creating order with data:', orderData);
+      
+      const { data: createdOrder, error: orderError } = await supabase
+        .from('orders')
+        .insert(orderData)
+        .select('order_id')
+        .single();
+        
+      const orderId = createdOrder?.order_id;
 
-    if (orderError) throw orderError;
+      if (orderError || !orderId) {
+        console.error('Order creation failed:', orderError || 'No order ID returned');
+        throw new Error(`Order creation failed: ${orderError?.message || 'Unknown error'}`);
+      }
+      console.log('Order created with ID:', orderId);
 
-    const orderId = orderData.order_id;
+      // 2. Prepare order items with subtotals
+      console.log('Inserting order items...');
+      const orderItemsWithId = orderItemsJson.map(item => ({
+        order_id: orderId,
+        product_id: item.product_id,
+        quantity: item.quantity,
+        unit_price: item.price,
+        subtotal: item.price * item.quantity
+      }));
 
-    // 2. Insert order items in batch
-    const orderItemsWithId = orderItemsJson.map(item => ({
-      ...item,
-      order_id: orderId,
-    }));
+      // 3. Insert order items in a single batch
+      const { error: itemsError } = await supabase
+        .from('order_product')
+        .insert(orderItemsWithId);
 
-    const { error: itemsError } = await supabase
-      .from('order_product')
-      .insert(orderItemsWithId);
+      if (itemsError) {
+        console.error('Failed to insert order items:', itemsError);
+        throw new Error(`Failed to save order items: ${itemsError.message}`);
+      }
 
-    if (itemsError) throw itemsError;
+      // 4. Record the payment
+      console.log('Recording payment...');
+      
+      // Map payment method to valid values from the database enum
+      const mapPaymentMethod = (method: string): string => {
+        const methodMap: Record<string, string> = {
+          'Cash': 'Cash',
+          'Credit Card': 'Card',
+          'Card': 'Card',
+          'GCash': 'GCash',
+          'PayPal': 'Other', // Map PayPal to 'Other' since it's not in the enum
+          'Other': 'Other'
+        };
+        return methodMap[method] || 'Other';
+      };
+      
+      const validPaymentMethod = mapPaymentMethod(paymentMethod);
+      
+      const paymentDataToInsert = {
+        order_id: orderId,
+        payment_date: orderDate,
+        amount_paid: total,
+        payment_method: validPaymentMethod,
+        payment_status: 'Completed',
+        transaction_reference: transactionId, // Changed from transaction_id to match schema
+        ...(validPaymentMethod === 'Cash' && paymentData.amountReceived && {
+          amount_received: paymentData.amountReceived,
+          change_given: paymentData.change || 0
+        })
+      };
+      
+      console.log('Inserting payment with data:', paymentDataToInsert);
+      
+      console.log('Inserting payment with data:', paymentDataToInsert);
+      
+      const { error: paymentError } = await supabase
+        .from('payment')
+        .insert(paymentDataToInsert);
 
-    // 3. Insert payment record
-    const paymentRecord = {
-      order_id: orderId,
-      payment_date: orderDate,
-      amount_paid: total,
-      payment_method: paymentMethod,
-      payment_status: 'Completed',
-      transaction_id: transactionId,
-    };
+      if (paymentError) {
+        console.error('Payment recording failed:', paymentError);
+        throw new Error(`Payment recording failed: ${paymentError.message}`);
+      }
 
-    const { error: paymentError } = await supabase
-      .from('payment')
-      .insert(paymentRecord);
+      // 5. Update inventory for each item
+      console.log('Updating inventory...');
+      for (const item of orderItemsJson) {
+        try {
+          const { error: inventoryError } = await supabase.rpc('decrement_inventory', {
+            p_product_id: item.product_id,
+            p_quantity: item.quantity
+          });
+          
+          if (inventoryError) {
+            console.warn(`Inventory update failed for product ${item.product_id}:`, inventoryError);
+            // Continue with other items even if one fails
+          }
+        } catch (inventoryError) {
+          console.warn(`Error updating inventory for product ${item.product_id}:`, inventoryError);
+          // Non-critical error, continue processing
+        }
+      }
 
-    if (paymentError) throw paymentError;
+      // 6. Verify the payment was recorded
+      console.log('Verifying payment...');
+      const { data: paymentRecord, error: verifyError } = await supabase
+        .from('payment')
+        .select('*')
+        .eq('order_id', orderId) // Verify by order_id since transaction_reference might not be indexed
+        .order('payment_date', { ascending: false })
+        .limit(1)
+        .single();
 
-    // 4. Update UI state
-    setCurrentOrderNumber(orderId + 1);
-    setShowCashPayment(false);
-    setShowGCashPayment(false);
-    setShowCreditCardPayment(false);
-    setShowPayPalPayment(false);
-    setSelectedPaymentMethod(null);
+      if (verifyError || !paymentRecord) {
+        console.error('Payment verification failed:', verifyError);
+        // Don't fail the whole process if verification fails
+        console.warn('Payment recorded but verification failed. Check database for order ID:', orderId);
+      } else {
+        console.log('Payment verified successfully:', paymentRecord);
+      }
 
-    // 5. Prepare receipt data
-    const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const tax = 6.0;
-    const discount = 0.0;
+      // 7. Update UI state
+      console.log('Updating UI...');
+      setCurrentOrderNumber(orderId + 1);
+      setOrderItems([]);
+      setPendingOrderData(null);
+      setShowReceiptModal(true);
 
-    setCompletedOrderData({
-      orderNumber: orderId,
-      orderItems: [...orderItems],
-      subtotal,
-      tax,
-      discount,
-      total,
-      paymentMethod,
-      transactionId,
-      customerName: custName,
-      orderDate: new Date(),
-    });
+      // 8. Show success message with order details
+      const changeMessage = paymentData.change ? `\nChange: ₱${paymentData.change.toFixed(2)}` : '';
+      Toast.show({
+        type: 'success',
+        text1: 'Payment Successful',
+        text2: `Order #${orderId} has been recorded${changeMessage}`,
+        visibilityTime: 5000,
+      });
 
-    // 6. Clear cart and show receipt
-    setOrderItems([]);
-    setPendingOrderData(null);
-    setShowReceiptModal(true);
+      // 9. Refresh inventory in the background if refresh function is available
+      if (refreshInventory) {
+        console.log('Refreshing inventory...');
+        try {
+          await refreshInventory();
+        } catch (inventoryError) {
+          console.warn('Background inventory refresh failed (non-critical):', inventoryError);
+        }
+      }
 
-    // 7. Refresh inventory if needed
-    if (refreshInventory) {
-      refreshInventory();
+      return { success: true, orderId };
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      console.error('Payment processing error:', errorMessage, error);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Payment Failed',
+        text2: errorMessage,
+        visibilityTime: 5000,
+      });
+      
+      console.error('Payment processing error:', {
+        message: errorMessage,
+        error,
+        paymentMethod,
+        paymentData,
+        orderData: pendingOrderData ? {
+          itemCount: pendingOrderData.orderItemsJson.length,
+          total: pendingOrderData.total
+        } : 'No pending order data'
+      });
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Payment Failed',
+        text2: 'Failed to process payment. Please try again.',
+        visibilityTime: 5000,
+      });
+      
+      return { success: false, error: errorMessage };
+    } finally {
+      console.log('Cleaning up UI state...');
+      setIsConfirmingOrder(false);
+      setShowCashPayment(false);
+      setShowGCashPayment(false);
+      setShowCreditCardPayment(false);
+      setShowPayPalPayment(false);
     }
-
-  } catch (error) {
-    console.error('Order processing error:', error);
-    Toast.show({
-      type: 'error',
-      text1: 'Order Failed',
-      text2: 'Failed to process order. Please try again.',
-      visibilityTime: 4000,
-    });
-  } finally {
-    setIsConfirmingOrder(false);
-  }
-};
+  };
 
   // Keep confirmOrder for backward compatibility (calls handleConfirmOrder)
   const confirmOrder = async () => {
@@ -659,10 +789,10 @@ export default function CashierPOS() {
             setPendingOrderData(null)
           }}
           totalAmount={pendingOrderData.total}
-          onPaymentComplete={(amountReceived, change) => {
+          onPaymentComplete={(paymentData) => {
             processOrderWithPayment("Cash", {
-              amountReceived,
-              change,
+              amountReceived: paymentData.amountReceived,
+              change: paymentData.change,
               transactionId: `CASH-${Date.now()}`,
             })
           }}

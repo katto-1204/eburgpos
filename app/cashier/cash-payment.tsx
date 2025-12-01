@@ -3,11 +3,16 @@ import { View, Text, TouchableOpacity, StyleSheet, TextInput, Modal, ActivityInd
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 
+interface PaymentData {
+  amountReceived: number;
+  change: number;
+}
+
 interface CashPaymentProps {
-  visible: boolean
-  onClose: () => void
-  totalAmount: number
-  onPaymentComplete: (amountReceived: number, change: number) => void
+  visible: boolean;
+  onClose: () => void;
+  totalAmount: number;
+  onPaymentComplete: (data: PaymentData) => void;
 }
 
 export default function CashPayment({ visible, onClose, totalAmount, onPaymentComplete }: CashPaymentProps) {
@@ -33,7 +38,10 @@ export default function CashPayment({ visible, onClose, totalAmount, onPaymentCo
     
     // Small delay to show loading state
     setTimeout(() => {
-      onPaymentComplete(received, change)
+      onPaymentComplete({
+        amountReceived: received,
+        change: change
+      })
       setIsProcessing(false)
     }, 500)
   }

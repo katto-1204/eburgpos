@@ -16,10 +16,10 @@ export default function PaymentMethodModal({
   onSelectMethod,
 }: PaymentMethodModalProps) {
   const paymentMethods = [
-    { id: "cash", name: "Cash", icon: "cash", color: "#10B981" },
-    { id: "paypal", name: "PayPal", icon: "logo-paypal", color: "#003087" },
-    { id: "credit", name: "Credit Card", icon: "card", color: "#3B82F6" },
-    { id: "gcash", name: "GCash", icon: "wallet", color: "#0066CC" },
+    { id: "cash", name: "Cash", value: "Cash", icon: "cash", color: "#10B981" },
+    { id: "card", name: "Card", value: "Card", icon: "card", color: "#3B82F6" },
+    { id: "gcash", name: "GCash", value: "GCash", icon: "wallet", color: "#0066CC" },
+    { id: "other", name: "Other", value: "Other", icon: "card-outline", color: "#6B7280" },
   ]
 
   return (
