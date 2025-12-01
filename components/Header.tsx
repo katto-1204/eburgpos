@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, TextInput } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, TextInput, Image } from "react-native"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 
@@ -10,14 +10,13 @@ interface HeaderProps {
 
 export default function Header({ searchQuery = "", onSearchChange, showSearch = true }: HeaderProps) {
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, !showSearch && styles.headerFixed]}>
       <View style={styles.headerLeft}>
         <View style={styles.logoCircle}>
-          <Text style={styles.logoText}>MB</Text>
+          <Image source={require("../images/minute burger.png")} style={styles.logoImage} resizeMode="contain" />
         </View>
         <View>
-          <Text style={styles.tagline}>Best Ang Sarap</Text>
-          <Text style={styles.brandName}>MINUTE BURGER</Text>
+          <Image source={require("../images/MINBURG TYPOGRAPHY.png")} style={styles.brandImage} resizeMode="contain" />
         </View>
       </View>
 
@@ -56,6 +55,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#E5E7EB",
   },
+  headerFixed: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1000,
+    display: "none",
+  },
   headerLeft: {
     flexDirection: "row",
     alignItems: "center",
@@ -69,19 +76,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 15,
   },
-  logoText: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#92400E",
+  logoImage: {
+    width: 30,
+    height: 30,
   },
-  tagline: {
-    fontSize: 12,
-    color: "#6B7280",
-  },
-  brandName: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#92400E",
+  brandImage: {
+    width: 30,
+    height: 30,
   },
   searchContainer: {
     flex: 1,

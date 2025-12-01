@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions, Image } from "react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
@@ -40,10 +40,10 @@ export default function AdminDashboard() {
         <View style={styles.headerContent}>
           <View style={styles.headerLeft}>
             <View style={styles.logoCircle}>
-              <Text style={styles.logoText}>MB</Text>
+              <Image source={require("../../images/minute burger.png")} style={styles.logoImage} resizeMode="contain" />
             </View>
             <View>
-              <Text style={styles.brandName}>MINUTE BURGER</Text>
+              <Image source={require("../../images/MINBURG TYPOGRAPHY.png")} style={styles.brandImage} resizeMode="contain" />
               <Text style={styles.adminLabel}>Admin Dashboard</Text>
             </View>
           </View>
@@ -156,15 +156,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 15,
   },
-  logoText: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#92400E",
+  logoImage: {
+    width: 30,
+    height: 30,
   },
-  brandName: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#92400E",
+  brandImage: {
+    width: 140,
+    height: 20,
+    marginBottom: 2,
   },
   adminLabel: {
     fontSize: 14,

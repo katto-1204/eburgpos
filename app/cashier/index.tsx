@@ -10,6 +10,13 @@ import Header from "../../components/Header"
 import type { MenuItem, OrderItem } from "../../types"
 import { supabase } from "../../utils/supabaseClient"
 import { getProductImage } from "../../utils/constants"
+import PaymentMethodModal from "./payment-method"
+import CashPayment from "./cash-payment"
+import GCashPayment from "./gcash"
+import CreditCardPayment from "./credit-card"
+import PayPalPayment from "./paypal"
+import TotalModal from "./total-modal"
+import ReceiptModal from "./receipt-modal"
 
 const { width } = Dimensions.get("window")
 
@@ -75,6 +82,31 @@ export default function CashierPOS() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [categories, setCategories] = useState<string[]>(["All"])
   const [menuLoading, setMenuLoading] = useState(true)
+  const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false)
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<"Cash" | "Maya" | "Credit Card" | "GCash" | null>(null)
+  const [showCashPayment, setShowCashPayment] = useState(false)
+  const [showGCashPayment, setShowGCashPayment] = useState(false)
+  const [showCreditCardPayment, setShowCreditCardPayment] = useState(false)
+  const [showPayPalPayment, setShowPayPalPayment] = useState(false)
+  const [pendingOrderData, setPendingOrderData] = useState<{
+    orderItemsJson: any[]
+    total: number
+    customerName: string
+  } | null>(null)
+  const [showTotalModal, setShowTotalModal] = useState(false)
+  const [showReceiptModal, setShowReceiptModal] = useState(false)
+  const [completedOrderData, setCompletedOrderData] = useState<{
+    orderNumber: number
+    orderItems: OrderItem[]
+    subtotal: number
+    tax: number
+    discount: number
+    total: number
+    paymentMethod: string
+    transactionId?: string
+    customerName: string
+    orderDate: Date
+  } | null>(null)
 
   // Fetch menu items from database
   useEffect(() => {
@@ -258,20 +290,9 @@ export default function CashierPOS() {
   }
 
   /**
-   * Confirm and process the order using atomic database transaction
-   *
-   * This function uses the database's process_complete_order() transaction function which:
-   * 1. Validates all inventory stock availability
-   * 2. Creates the order record atomically
-   * 3. Inserts all order items
-   * 4. Deducts inventory (via database trigger)
-   * 5. Processes payment if provided
-   * 6. Updates order status to 'Completed'
-   * 7. Logs the transaction for audit trail
-   *
-   * If any step fails, the entire transaction is rolled back automatically.
+   * Show total modal first, then payment method selection
    */
-  const confirmOrder = async () => {
+  const handleConfirmOrder = () => {
     if (orderItems.length === 0) {
       Toast.show({
         type: "error",
@@ -282,26 +303,90 @@ export default function CashierPOS() {
       return
     }
 
+    // Calculate total and show total modal first
+    const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+    const tax = 6.0
+    const discount = 0.0
+    const total = subtotal + tax - discount
+
+    const orderItemsJson = orderItems.map((item) => ({
+      product_id: Number(item.id),
+      quantity: item.quantity,
+      unit_price: item.price,
+    }))
+
+    setPendingOrderData({
+      orderItemsJson,
+      total,
+      customerName: customerName || "Walk-in Customer",
+    })
+
+    // Show total modal first
+    setShowTotalModal(true)
+  }
+
+  /**
+   * Continue from total modal to payment method selection
+   */
+  const handleContinueToPayment = () => {
+    setShowTotalModal(false)
+    setShowPaymentMethodModal(true)
+  }
+
+  /**
+   * Handle payment method selection
+   */
+  const handlePaymentMethodSelect = (method: "Cash" | "Maya" | "Credit Card" | "GCash") => {
+    setSelectedPaymentMethod(method)
+    setShowPaymentMethodModal(false)
+
+    if (method === "Cash") {
+      setShowCashPayment(true)
+    } else if (method === "GCash") {
+      setShowGCashPayment(true)
+    } else if (method === "Credit Card") {
+      setShowCreditCardPayment(true)
+    } else if (method === "Maya") {
+      // Maya can use similar flow to GCash or PayPal
+      setShowPayPalPayment(true)
+    }
+  }
+
+  /**
+   * Process order after payment is completed
+   */
+  const processOrderWithPayment = async (paymentMethod: string, paymentData: any) => {
+    if (!pendingOrderData) return
+
     setIsConfirmingOrder(true)
 
     try {
-      // Calculate total amount including tax
-      const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
-      const tax = 6.0
-      const discount = 0.0
-      const total = subtotal + tax - discount
+      const { orderItemsJson, total, customerName: custName } = pendingOrderData
 
-      // Prepare order items in JSONB format for the transaction function
-      const orderItemsJson = orderItems.map((item) => ({
-        product_id: Number(item.id),
-        quantity: item.quantity,
-        unit_price: item.price,
-      }))
-
-      // Prepare payment info (cash payment by default)
-      const paymentInfo = {
+      // Prepare payment info with method and transaction data
+      const paymentInfo: any = {
         amount_paid: total,
-        payment_method: "Cash"
+        payment_method: paymentMethod,
+      }
+
+      // Add payment-specific data
+      if (paymentData.transactionId) {
+        paymentInfo.transaction_id = paymentData.transactionId
+      }
+      if (paymentData.amountReceived) {
+        paymentInfo.amount_received = paymentData.amountReceived
+      }
+      if (paymentData.change) {
+        paymentInfo.change = paymentData.change
+      }
+      if (paymentData.email) {
+        paymentInfo.email = paymentData.email
+      }
+      if (paymentData.cardLast4) {
+        paymentInfo.card_last_4 = paymentData.cardLast4
+      }
+      if (paymentData.cardholderName) {
+        paymentInfo.cardholder_name = paymentData.cardholderName
       }
 
       // TODO: Add cashier_id when authentication is implemented
@@ -318,13 +403,12 @@ export default function CashierPOS() {
       })
 
       // Call the atomic transaction function
-      const { data: result, error: transactionError } = await supabase
-        .rpc('process_complete_order', {
-          customer_name_param: customerName || "Walk-in Customer",
-          order_items_param: orderItemsJson,
-          payment_info_param: paymentInfo,
-          cashier_id_param: cashierId
-        })
+      const { data: result, error: transactionError } = await supabase.rpc("process_complete_order", {
+        customer_name_param: custName,
+        order_items_param: orderItemsJson,
+        payment_info_param: paymentInfo,
+        cashier_id_param: cashierId,
+      })
 
       if (transactionError) {
         console.error("Transaction error:", transactionError)
@@ -351,16 +435,42 @@ export default function CashierPOS() {
       // Transaction successful!
       console.log("✅ Order processed successfully:", result)
 
+      // Calculate totals for receipt
+      const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+      const tax = 6.0
+      const discount = 0.0
+
       // Clear cart and update order number
-      setOrderItems([])
       const nextOrderNumber = currentOrderNumber + 1
       setCurrentOrderNumber(nextOrderNumber)
 
-      Toast.show({
-        type: "success",
-        text1: "Order Confirmed!",
-        text2: `Order #${nextOrderNumber} processed successfully`,
+      // Close payment modals
+      setShowCashPayment(false)
+      setShowGCashPayment(false)
+      setShowCreditCardPayment(false)
+      setShowPayPalPayment(false)
+      setSelectedPaymentMethod(null)
+
+      // Set completed order data for receipt
+      setCompletedOrderData({
+        orderNumber: nextOrderNumber,
+        orderItems: [...orderItems],
+        subtotal,
+        tax,
+        discount,
+        total,
+        paymentMethod,
+        transactionId: paymentData.transactionId,
+        customerName: custName,
+        orderDate: new Date(),
       })
+
+      // Clear cart
+      setOrderItems([])
+      setPendingOrderData(null)
+
+      // Show receipt modal
+      setShowReceiptModal(true)
 
       // Trigger inventory refresh after a brief delay
       setTimeout(() => {
@@ -381,6 +491,11 @@ export default function CashierPOS() {
     } finally {
       setIsConfirmingOrder(false)
     }
+  }
+
+  // Keep confirmOrder for backward compatibility (calls handleConfirmOrder)
+  const confirmOrder = async () => {
+    handleConfirmOrder()
   }
 
   const getItemQuantity = (itemId: string) => {
@@ -493,6 +608,120 @@ export default function CashierPOS() {
         {/* Order Panel */}
         <OrderPanel />
       </View>
+
+      {/* Total Modal - Shows first when Confirm Order is clicked */}
+      {pendingOrderData && (
+        <TotalModal
+          visible={showTotalModal}
+          onClose={() => {
+            setShowTotalModal(false)
+            setPendingOrderData(null)
+          }}
+          onContinue={handleContinueToPayment}
+          totalAmount={pendingOrderData.total}
+          subtotal={orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0)}
+          tax={6.0}
+          discount={0.0}
+        />
+      )}
+
+      {/* Payment Method Selection Modal */}
+      {pendingOrderData && (
+        <PaymentMethodModal
+          visible={showPaymentMethodModal}
+          onClose={() => {
+            setShowPaymentMethodModal(false)
+            setPendingOrderData(null)
+          }}
+          totalAmount={pendingOrderData.total}
+          onSelectMethod={handlePaymentMethodSelect}
+        />
+      )}
+
+      {/* Cash Payment Modal */}
+      {pendingOrderData && (
+        <CashPayment
+          visible={showCashPayment}
+          onClose={() => {
+            setShowCashPayment(false)
+            setPendingOrderData(null)
+          }}
+          totalAmount={pendingOrderData.total}
+          onPaymentComplete={(amountReceived, change) => {
+            processOrderWithPayment("Cash", {
+              amountReceived,
+              change,
+              transactionId: `CASH-${Date.now()}`,
+            })
+          }}
+        />
+      )}
+
+      {/* GCash Payment Modal */}
+      {pendingOrderData && (
+        <GCashPayment
+          visible={showGCashPayment}
+          onClose={() => {
+            setShowGCashPayment(false)
+            setPendingOrderData(null)
+          }}
+          totalAmount={pendingOrderData.total}
+          onPaymentComplete={(transactionId) => {
+            processOrderWithPayment("GCash", { transactionId })
+          }}
+        />
+      )}
+
+      {/* Credit Card Payment Modal */}
+      {pendingOrderData && (
+        <CreditCardPayment
+          visible={showCreditCardPayment}
+          onClose={() => {
+            setShowCreditCardPayment(false)
+            setPendingOrderData(null)
+          }}
+          totalAmount={pendingOrderData.total}
+          onPaymentComplete={(transactionId) => {
+            processOrderWithPayment("Credit Card", { transactionId })
+          }}
+        />
+      )}
+
+      {/* PayPal Payment Modal */}
+      {pendingOrderData && (
+        <PayPalPayment
+          visible={showPayPalPayment}
+          onClose={() => {
+            setShowPayPalPayment(false)
+            setPendingOrderData(null)
+          }}
+          totalAmount={pendingOrderData.total}
+          onPaymentComplete={(transactionId) => {
+            processOrderWithPayment("Maya", { transactionId })
+          }}
+        />
+      )}
+
+      {/* Receipt Modal - Shows after payment is completed */}
+      {completedOrderData && (
+        <ReceiptModal
+          visible={showReceiptModal}
+          onClose={() => {
+            setShowReceiptModal(false)
+            setCompletedOrderData(null)
+          }}
+          orderNumber={completedOrderData.orderNumber}
+          orderItems={completedOrderData.orderItems}
+          subtotal={completedOrderData.subtotal}
+          tax={completedOrderData.tax}
+          discount={completedOrderData.discount}
+          total={completedOrderData.total}
+          paymentMethod={completedOrderData.paymentMethod}
+          transactionId={completedOrderData.transactionId}
+          customerName={completedOrderData.customerName}
+          orderDate={completedOrderData.orderDate}
+        />
+      )}
     </CartContext.Provider>
     </InventoryRefreshContext.Provider>
   )
