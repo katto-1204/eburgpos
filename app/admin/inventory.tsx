@@ -1,10 +1,11 @@
 "use client"
 
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert } from "react-native"
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert, Image } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useState, useEffect } from "react"
 import { router } from "expo-router"
 import { supabase } from "../../utils/supabaseClient"
+import { getProductImage } from "../../utils/constants"
 
 interface InventoryItem {
   product_id: number
@@ -321,7 +322,7 @@ export default function AdminInventory() {
               <View key={item.product_id} style={styles.inventoryItem}>
                 <View style={styles.itemLeft}>
                   <View style={styles.itemImage}>
-                    <Text style={styles.itemImageText}>🍔</Text>
+                    <Image source={getProductImage(item.name)} style={styles.itemImageContent} resizeMode="contain" />
                   </View>
                   <View style={styles.itemDetails}>
                     <Text style={styles.itemName}>{item.name}</Text>
@@ -594,8 +595,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 16,
   },
-  itemImageText: {
-    fontSize: 24,
+  itemImageContent: {
+    width: "100%",
+    height: "100%",
   },
   itemDetails: {
     flex: 1,

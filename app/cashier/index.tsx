@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, createContext, useContext, useEffect } from "react"
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions, ActivityIndicator, TextInput } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions, ActivityIndicator, TextInput, Image } from "react-native"
 import Toast from "react-native-toast-message"
 import { Ionicons } from "@expo/vector-icons"
 
@@ -9,6 +9,7 @@ import Sidebar from "../../components/Sidebar"
 import Header from "../../components/Header"
 import type { MenuItem, OrderItem } from "../../types"
 import { supabase } from "../../utils/supabaseClient"
+import { getProductImage } from "../../utils/constants"
 
 const { width } = Dimensions.get("window")
 
@@ -450,7 +451,7 @@ export default function CashierPOS() {
                   <TouchableOpacity key={item.id} style={styles.menuItem} onPress={() => addToOrder(item)}>
                       <View style={styles.menuItemContent}>
                     <View style={styles.menuItemImage}>
-                      <Text style={styles.menuItemImageText}>🍔</Text>
+                      <Image source={getProductImage(item.name)} style={styles.menuItemImageContent} resizeMode="contain" />
                     </View>
                         <View style={styles.menuItemTextContainer}>
                           <Text style={styles.menuItemName} numberOfLines={2} ellipsizeMode="tail">{item.name}</Text>
@@ -598,7 +599,7 @@ function OrderPanel() {
                 </TouchableOpacity>
               </View>
               <View style={styles.orderItemImage}>
-                <Text style={styles.orderItemImageText}>🍔</Text>
+                <Image source={getProductImage(item.name)} style={styles.orderItemImageContent} resizeMode="contain" />
               </View>
               <View style={styles.orderItemDetails}>
                 <Text style={styles.orderItemName}>{item.name}</Text>
@@ -722,8 +723,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 10,
   },
-  menuItemImageText: {
-    fontSize: 30,
+  menuItemImageContent: {
+    width: "100%",
+    height: "100%",
   },
   menuItemTextContainer: {
     flex: 1,
@@ -907,8 +909,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  orderItemImageText: {
-    fontSize: 16,
+  orderItemImageContent: {
+    width: "100%",
+    height: "100%",
   },
   orderItemDetails: {
     flex: 1,

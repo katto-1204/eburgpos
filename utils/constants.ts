@@ -126,3 +126,73 @@ export const categories = [
   "Beverages",
   "Extras/Side Items",
 ]
+
+/**
+ * Get image source for a product based on its name
+ * Maps product names to their corresponding image files
+ */
+export function getProductImage(productName: string): any {
+  const name = productName.toLowerCase()
+
+  // Map product names to image files (check specific items first before generic categories)
+  if (name.includes("steak")) {
+    return require("../images/SteakBurger.png")
+  }
+  if (name.includes("bacon") && name.includes("cheese")) {
+    return require("../images/BaconCheese.png")
+  }
+  if (name.includes("beef") && name.includes("shawarma")) {
+    return require("../images/BeefShawarma.png")
+  }
+  if (name.includes("black pepper")) {
+    return require("../images/BlackPepper.png")
+  }
+  if (name.includes("cheesy") && name.includes("burger") && !name.includes("double")) {
+    return require("../images/CheesyBurger.png")
+  }
+  if (name.includes("cheesy") && name.includes("nachos")) {
+    return require("../images/CheesyNachos.png")
+  }
+  if (name.includes("chicken") && name.includes("chimichurri")) {
+    return require("../images/ChickenChimichurri.png")
+  }
+  if (name.includes("chicken") && name.includes("roasted")) {
+    return require("../images/ChickenRoasted.png")
+  }
+  if (name.includes("chicken time") && name.includes("double")) {
+    return require("../images/DoubleChickenTime.png")
+  }
+  if (name.includes("chicken time")) {
+    return require("../images/ChickenTime.png")
+  }
+  if (name.includes("chili") && name.includes("cheese")) {
+    return require("../images/ChiliCheese.png")
+  }
+  if (name.includes("double") && name.includes("cheesy")) {
+    return require("../images/DoubleCheesy.png")
+  }
+  if (name.includes("double") && name.includes("minute")) {
+    return require("../images/DoubleMinute.png")
+  }
+  if (name.includes("french onion")) {
+    return require("../images/FrenchOnion.png")
+  }
+  if (name.includes("minute burger") && !name.includes("double")) {
+    return require("../images/MinuteBurger.png")
+  }
+
+  // Drinks/Beverages - use Calamantea.png for all drinks (check after specific items)
+  // Check for "tea" as a word (not part of "steak") by checking if it's at the end or followed by space/end
+  const isTea = name.includes("calamantea") || name.endsWith("tea") || name.includes(" tea") || name.includes("tea ")
+  if (isTea || name.includes("iced choco") || name.includes("choco") || 
+      name.includes("drink") || name.includes("beverage") || 
+      name.includes("soda") || name.includes("juice") || name.includes("shake")) {
+    return require("../images/Calamantea.png")
+  }
+  if (name.includes("veggie") && name.includes("chicken")) {
+    return require("../images/VeggieChicken.png")
+  }
+
+  // Default fallback to MinuteBurger
+  return require("../images/MinuteBurger.png")
+}
