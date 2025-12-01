@@ -1,12 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Dimensions, Alert } from "react-native"
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ImageBackground, Image } from "react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
-
-const { width, height } = Dimensions.get("window")
 
 export default function LoginScreen() {
   const [username, setUsername] = useState("")
@@ -31,54 +29,32 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#FCD34D", "#F59E0B", "#D97706"]} style={styles.gradient}>
-        <View style={styles.content}>
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-              <Ionicons name="arrow-back" size={24} color="#92400E" />
-            </TouchableOpacity>
-            <View style={styles.logoSection}>
-              <View style={styles.logoCircle}>
-                <Text style={styles.logoText}>MB</Text>
-              </View>
-              <Text style={styles.brandName}>MINUTE BURGER</Text>
+      <ImageBackground
+        source={require("../images/bg-welcome.png")}
+        style={styles.background}
+        resizeMode="cover"
+      >
+        <View style={styles.overlay}>
+          <View style={styles.card}>
+            {/* Brand / Logo */}
+            <View style={styles.logoWrapper}>
+              <Image
+                source={require("../images/minute burger.png")}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
             </View>
-          </View>
 
-          {/* Login Form */}
-          <View style={styles.loginForm}>
-            <Text style={styles.loginTitle}>Staff Login</Text>
-
-            {/* Role Selection */}
-            <View style={styles.roleSection}>
-              <Text style={styles.roleLabel}>Select Role:</Text>
-              <View style={styles.roleButtons}>
-                <TouchableOpacity
-                  style={[styles.roleButton, selectedRole === "cashier" && styles.roleButtonActive]}
-                  onPress={() => setSelectedRole("cashier")}
-                >
-                  <Ionicons name="person" size={20} color={selectedRole === "cashier" ? "#FFFFFF" : "#92400E"} />
-                  <Text style={[styles.roleButtonText, selectedRole === "cashier" && styles.roleButtonTextActive]}>
-                    Cashier
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.roleButton, selectedRole === "admin" && styles.roleButtonActive]}
-                  onPress={() => setSelectedRole("admin")}
-                >
-                  <Ionicons
-                    name="shield-checkmark"
-                    size={20}
-                    color={selectedRole === "admin" ? "#FFFFFF" : "#92400E"}
-                  />
-                  <Text style={[styles.roleButtonText, selectedRole === "admin" && styles.roleButtonTextActive]}>
-                    Admin
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+            {/* Role specific header */}
+            <Text style={styles.roleBadge}>{selectedRole === "cashier" ? "Cashier Portal" : "Admin Console"}</Text>
+            <Text style={styles.loginTitle}>
+              {selectedRole === "cashier" ? "Cashier Sign In" : "Admin Sign In"}
+            </Text>
+            <Text style={styles.subtitle}>
+              {selectedRole === "cashier"
+                ? "Serve customers faster with your Minute Burger POS."
+                : "Manage menus, inventory, and sales with full control."}
+            </Text>
 
             {/* Input Fields */}
             <View style={styles.inputSection}>
@@ -86,10 +62,11 @@ export default function LoginScreen() {
                 <Ionicons name="person-outline" size={20} color="#6B7280" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Username"
+                  placeholder={selectedRole === "cashier" ? "Cashier username" : "Admin username"}
                   value={username}
                   onChangeText={setUsername}
                   autoCapitalize="none"
+                  placeholderTextColor="#9CA3AF"
                 />
               </View>
 
@@ -101,24 +78,43 @@ export default function LoginScreen() {
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry
+                  placeholderTextColor="#9CA3AF"
                 />
               </View>
             </View>
 
-            {/* Login Button */}
+            {/* Login Button with gradient */}
             <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-              <Text style={styles.loginButtonText}>Login</Text>
+              <LinearGradient
+                colors={selectedRole === "cashier" ? ["#FF9F1C", "#FF5F00"] : ["#111827", "#000000"]}
+                style={styles.loginButtonGradient}
+              >
+                <Text style={styles.loginButtonText}>
+                  {selectedRole === "cashier" ? "Sign in as Cashier" : "Sign in as Admin"}
+                </Text>
+              </LinearGradient>
             </TouchableOpacity>
 
+            {/* Switch role */}
+            {selectedRole === "cashier" ? (
+              <TouchableOpacity style={styles.switchRole} onPress={() => setSelectedRole("admin")}>
+                <Text style={styles.switchRoleText}>
+                  Want to manage the store? <Text style={styles.switchRoleEmphasis}>Sign in as ADMIN</Text>
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.switchRole} onPress={() => setSelectedRole("cashier")}>
+                <Text style={styles.switchRoleText}>
+                  Back to counter? <Text style={styles.switchRoleEmphasis}>Sign in as CASHIER</Text>
+                </Text>
+              </TouchableOpacity>
+            )}
+
             {/* Demo Credentials */}
-            <View style={styles.demoSection}>
-              <Text style={styles.demoTitle}>Demo Credentials:</Text>
-              <Text style={styles.demoText}>Cashier: cashier / cashier123</Text>
-              <Text style={styles.demoText}>Admin: admin / admin123</Text>
-            </View>
+
           </View>
         </View>
-      </LinearGradient>
+      </ImageBackground>
     </View>
   )
 }
@@ -127,59 +123,61 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  gradient: {
+  background: {
     flex: 1,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 40,
-    paddingVertical: 20,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 40,
-  },
-  backButton: {
-    padding: 10,
-    marginRight: 20,
-  },
-  logoSection: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  logoCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#FCD34D",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 15,
-  },
-  logoText: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#92400E",
-  },
-  brandName: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#92400E",
-  },
-  loginForm: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    maxWidth: 500,
-    alignSelf: "center",
     width: "100%",
+    height: "100%",
+  },
+  overlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+    backgroundColor: "rgba(0,0,0,0.18)",
+  },
+  card: {
+    width: "100%",
+    maxWidth: 500,
+    borderRadius: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    backgroundColor: "rgba(255,255,255,0.96)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  logoWrapper: {
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  logoImage: {
+    width: "90%",
+    height: 120,
+  },
+  roleBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "#FEF3C7",
+    color: "#92400E",
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 6,
   },
   loginTitle: {
     fontSize: 32,
-    fontWeight: "bold",
-    color: "#1F2937",
-    marginBottom: 40,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: "#6B7280",
+    marginBottom: 26,
   },
   roleSection: {
     width: "100%",
@@ -221,7 +219,7 @@ const styles = StyleSheet.create({
   },
   inputSection: {
     width: "100%",
-    marginBottom: 30,
+    marginBottom: 24,
   },
   inputContainer: {
     flexDirection: "row",
@@ -247,21 +245,35 @@ const styles = StyleSheet.create({
   },
   loginButton: {
     width: "100%",
-    backgroundColor: "#1F2937",
-    paddingVertical: 15,
-    borderRadius: 10,
+    borderRadius: 999,
     alignItems: "center",
-    marginBottom: 30,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    marginBottom: 16,
+    overflow: "hidden",
+  },
+  loginButtonGradient: {
+    width: "100%",
+    paddingVertical: 15,
+    borderRadius: 999,
+    justifyContent: "center",
+    alignItems: "center",
   },
   loginButtonText: {
     color: "#FFFFFF",
     fontSize: 18,
     fontWeight: "bold",
+  },
+  switchRole: {
+    marginBottom: 18,
+  },
+  switchRoleText: {
+    textAlign: "center",
+    fontSize: 13,
+    color: "#4B5563",
+  },
+  switchRoleEmphasis: {
+    color: "#B45309",
+    fontWeight: "800",
+    textTransform: "uppercase",
   },
   demoSection: {
     alignItems: "center",
