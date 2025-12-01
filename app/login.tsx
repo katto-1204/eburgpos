@@ -111,7 +111,6 @@ export default function LoginScreen() {
             )}
 
             {/* Demo Credentials */}
-
           </View>
         </View>
       </ImageBackground>
