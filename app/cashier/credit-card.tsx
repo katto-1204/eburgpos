@@ -1,8 +1,8 @@
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { View, Text, TouchableOpacity, StyleSheet, TextInput, Modal, ScrollView } from "react-native"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
-import FlippingCard, { useFlippingCard } from "../../components/FlippingCard"
+import FlippingCard from "../../components/FlippingCard"
 import { supabase } from "../../utils/supabaseClient"
 
 interface CreditCardPaymentProps {
@@ -27,8 +27,7 @@ export default function CreditCardPayment({
   const [showSuccess, setShowSuccess] = useState(false)
   const [transactionId, setTransactionId] = useState("")
   const [errors, setErrors] = useState<{ [key: string]: string }>({})
-
-  const { flipCard } = useFlippingCard()
+  const [isFlipped, setIsFlipped] = useState(false)
 
   const formatCardNumber = (text: string) => {
     const digits = text.replace(/\s/g, "").slice(0, 16)
@@ -62,6 +61,14 @@ export default function CreditCardPayment({
   const handleCardNameChange = (text: string) => {
     setCardName(text.toUpperCase())
     setErrors({ ...errors, cardName: "" })
+  }
+
+  const handleCvvFocus = () => {
+    setIsFlipped(true)
+  }
+
+  const handleCvvBlur = () => {
+    setIsFlipped(false)
   }
 
   const validateForm = () => {
@@ -141,8 +148,9 @@ export default function CreditCardPayment({
                 cardName={cardName}
                 expiry={expiry}
                 cvv={cvv}
-                onCvvFocus={() => flipCard(true)}
-                onCvvBlur={() => flipCard(false)}
+                isFlipped={isFlipped}
+                onCvvFocus={handleCvvFocus}
+                onCvvBlur={handleCvvBlur}
               />
 
               <View style={styles.form}>
@@ -180,8 +188,8 @@ export default function CreditCardPayment({
                       placeholder="123"
                       value={cvv}
                       onChangeText={handleCvvChange}
-                      onFocus={() => flipCard(true)}
-                      onBlur={() => flipCard(false)}
+                      onFocus={handleCvvFocus}
+                      onBlur={handleCvvBlur}
                       keyboardType="number-pad"
                       maxLength={3}
                       secureTextEntry

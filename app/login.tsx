@@ -1,15 +1,22 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ImageBackground, Image } from "react-native"
 import { LinearGradient } from "expo-linear-gradient"
-import { router } from "expo-router"
+import { router, useLocalSearchParams } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 
 export default function LoginScreen() {
+  const { role } = useLocalSearchParams()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
-  const [selectedRole, setSelectedRole] = useState<"admin" | "cashier">("cashier")
+  const [selectedRole, setSelectedRole] = useState<"admin" | "cashier">((role as "admin" | "cashier") || "cashier")
+
+  useEffect(() => {
+    if (role === "admin" || role === "cashier") {
+      setSelectedRole(role)
+    }
+  }, [role])
 
   const handleLogin = () => {
     if (!username || !password) {

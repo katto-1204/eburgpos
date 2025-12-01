@@ -336,7 +336,7 @@ export default function CashierPOS() {
   /**
    * Handle payment method selection
    */
-  const handlePaymentMethodSelect = (method: "Cash" | "Maya" | "Credit Card" | "GCash") => {
+  const handlePaymentMethodSelect = (method: "Cash" | "PayPal" | "Credit Card" | "GCash") => {
     setSelectedPaymentMethod(method)
     setShowPaymentMethodModal(false)
 
@@ -346,8 +346,7 @@ export default function CashierPOS() {
       setShowGCashPayment(true)
     } else if (method === "Credit Card") {
       setShowCreditCardPayment(true)
-    } else if (method === "Maya") {
-      // Maya can use similar flow to GCash or PayPal
+    } else if (method === "PayPal") {
       setShowPayPalPayment(true)
     }
   }
@@ -697,7 +696,7 @@ export default function CashierPOS() {
           }}
           totalAmount={pendingOrderData.total}
           onPaymentComplete={(transactionId) => {
-            processOrderWithPayment("Maya", { transactionId })
+            processOrderWithPayment("PayPal", { transactionId })
           }}
         />
       )}

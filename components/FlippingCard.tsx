@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react"
+import React, { useState, useRef, useEffect } from "react"
 import { View, Text, Animated, StyleSheet } from "react-native"
 
 interface FlippingCardProps {
@@ -10,6 +10,7 @@ interface FlippingCardProps {
   onCvvBlur?: () => void
   cardColor?: string
   showCvvOnBack?: boolean
+  isFlipped?: boolean
 }
 
 export default function FlippingCard({
@@ -21,9 +22,21 @@ export default function FlippingCard({
   onCvvBlur,
   cardColor = "#1054CF",
   showCvvOnBack = true,
+  isFlipped: externalIsFlipped = false,
 }: FlippingCardProps) {
-  const [isFlipped, setIsFlipped] = useState(false)
+  const [isFlipped, setIsFlipped] = useState(externalIsFlipped)
   const flipAnimation = useRef(new Animated.Value(0)).current
+
+  // Update animation when external isFlipped changes
+  useEffect(() => {
+    setIsFlipped(externalIsFlipped)
+    Animated.spring(flipAnimation, {
+      toValue: externalIsFlipped ? 180 : 0,
+      friction: 8,
+      tension: 10,
+      useNativeDriver: true,
+    }).start()
+  }, [externalIsFlipped])
 
   const flipCard = (showBack: boolean) => {
     if (showBack === isFlipped) return

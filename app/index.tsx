@@ -19,10 +19,10 @@ export default function WelcomeScreen() {
 
           {/* Action Buttons under the logo */}
           <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.cashierButton} onPress={() => router.push("/login")}>
+            <TouchableOpacity style={styles.cashierButton} onPress={() => router.push({ pathname: "/login", params: { role: "cashier" } })}>
               <Text style={styles.cashierText}>CASHIER</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.adminButton} onPress={() => router.push("/login")}>
+            <TouchableOpacity style={styles.adminButton} onPress={() => router.push({ pathname: "/login", params: { role: "admin" } })}>
               <Text style={styles.adminText}>ADMIN</Text>
             </TouchableOpacity>
           </View>

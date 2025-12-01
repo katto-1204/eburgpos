@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingTop: 70,
+    paddingTop: 0,
   },
   pageHeader: {
     backgroundColor: "#FFFFFF",
